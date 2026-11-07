@@ -22,15 +22,11 @@ import {
 } from "lucide-react";
 import type { ConverterSettings, RuntimeInfo, UpdateCheckResult } from "../bridge";
 import { bridge } from "../bridge";
-import { StoryTermsModal } from "./StoryTermsModal";
-import { UpdateChangesModal } from "./UpdateChangesModal";
-import { SettingsBrowserTab } from "./settings/SettingsBrowserTab";
-import { SettingsHardwareTab } from "./settings/SettingsHardwareTab";
 import { SettingsThemeTab } from "./settings/SettingsThemeTab";
 import { SettingsSystemTab } from "./settings/SettingsSystemTab";
 import { SettingsGuideTab } from "./settings/SettingsGuideTab";
 
-export type SettingsTab = "browser" | "hardware" | "theme" | "system" | "guide";
+export type SettingsTab = "theme" | "system" | "guide";
 
 export function SettingsView({
   runtime,
@@ -58,7 +54,7 @@ export function SettingsView({
   onResetAppearance,
   onSaveAppearance,
   onStatus,
-  initialTab = "browser",
+  initialTab = "theme",
   updateResult: propUpdateResult,
   onCheckUpdates,
   isCheckingUpdates = false,
@@ -257,10 +253,8 @@ export function SettingsView({
         {/* Tab Filter Pills */}
         <div className="mt-5 flex flex-wrap items-center gap-1.5 border-b border-white/[0.06] pb-3" role="tablist" aria-label="Settings categories">
           {[
-            { id: "browser" as const, label: "Browser & Sessions", icon: Globe },
-            { id: "hardware" as const, label: "Hardware & Engine", icon: Zap },
             { id: "theme" as const, label: "Appearance", icon: Palette },
-            { id: "system" as const, label: "System & Updates", icon: HardDrive },
+            { id: "system" as const, label: "System & Runtime", icon: HardDrive },
             { id: "guide" as const, label: "User Manual", icon: BookOpen },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -287,32 +281,7 @@ export function SettingsView({
       </div>
 
       {/* Tab Panels */}
-      {activeTab === "browser" && (
-        <SettingsBrowserTab
-          settings={settings}
-          onSettings={onSettings}
-          toggleBrowserCookies={toggleBrowserCookies}
-          setShowStoryModal={setShowStoryModal}
-          setMessage={setMessage}
-          onStatus={onStatus}
-        />
-      )}
-
-      {activeTab === "hardware" && (
-        <SettingsHardwareTab
-          settings={settings}
-          onSettings={onSettings}
-          runtime={runtime}
-          dataRootPath={dataRootPath}
-          setDataRootPath={setDataRootPath}
-          changingDataRoot={changingDataRoot}
-          relaunching={relaunching}
-          toggleAdaptiveGpu={toggleAdaptiveGpu}
-          chooseDataRoot={chooseDataRoot}
-          changeDataRoot={changeDataRoot}
-          relaunch={relaunch}
-        />
-      )}
+      
 
       {activeTab === "theme" && (
         <SettingsThemeTab
@@ -359,7 +328,7 @@ export function SettingsView({
       )}
 
       {activeTab === "guide" && (
-        <SettingsGuideTab onNavigateTab={(tab) => setActiveTab(tab)} />
+        <SettingsGuideTab />
       )}
 
       {/* Status Bar */}
@@ -378,29 +347,7 @@ export function SettingsView({
         User-selected folders are always respected.
       </div>
 
-      {/* Modals */}
-      <StoryTermsModal
-        isOpen={showStoryModal}
-        accentColor={accentColor}
-        onClose={() => setShowStoryModal(false)}
-        onConfirm={() => {
-          if (settings && onSettings) {
-            onSettings({ ...settings, allowStoryExtraction: true });
-            const msg = "Ephemeral stories extraction enabled. Terms of Usage acknowledged.";
-            setMessage(msg);
-            onStatus(msg);
-          }
-        }}
-      />
 
-      <UpdateChangesModal
-        open={showLocalChangesModal}
-        onClose={() => setShowLocalChangesModal(false)}
-        updateResult={effectiveUpdateResult}
-        installing={installing}
-        onInstall={() => void installUpdate()}
-        theme={isColorLight(bgColor) ? "light" : "dark"}
-      />
     </div>
   );
 }

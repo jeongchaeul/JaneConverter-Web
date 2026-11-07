@@ -1,3 +1,6 @@
+function isAppUpdateAvailable(repoUpdate?: { has_update?: boolean } | null): boolean {
+  return Boolean(repoUpdate?.has_update);
+}
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Clock, FolderOpen, GripVertical, HardDrive, Play, RotateCcw, X } from "lucide-react";
@@ -5,13 +8,7 @@ import { bridge, type AccessStatus, type ConversionHistoryItem, type ConverterEv
 import { Sidebar, type ViewKey } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { ConverterView } from "./components/ConverterView";
-import { LibraryView } from "./components/LibraryView";
-import { ConsoleView } from "./components/ConsoleView";
-import { HardwarePipelineView } from "./components/HardwarePipelineView";
 import { SettingsView } from "./components/SettingsView";
-import { FetchedMediaView } from "./components/FetchedMediaView";
-import { UpdatePromptHeader, isAppUpdateAvailable } from "./components/UpdatePromptHeader";
-import { UpdateChangesModal } from "./components/UpdateChangesModal";
 import { detectCategoryFromPath, findPresetName, formatBytes, formatElapsedMs } from "./options";
 import { appendOrCollapseProgressEvent, extractYouTubeUrlFromThumbnail } from "./components/inprogress/parser";
 import { clearAppearanceStorage, loadAppearanceFromStorage, saveAppearanceToStorage, type AppearanceSettings } from "./utils/appearanceStorage";
@@ -867,7 +864,7 @@ export default function App() {
       setPaused(false);
       setProgress(.02);
       setStatus("Starting conversion...");
-      setActiveView("console");
+      setActiveView("converter");
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -944,125 +941,40 @@ export default function App() {
     }
   }
 
-  const secondaryContent = activeView === "fetched"
-    ? <FetchedMediaView access={access} settings={settings} onSettings={updateSettings} onCreateAccess={() => createAccess("")} onClearAccess={clearAccess} onSelect={(item) => { setSelectedCapture(item); setActiveView("converter"); statusMessage(item.name + " selected and ready to convert."); }} onDiscard={(item) => { if (selectedCapture?.path === item.path) setSelectedCapture(null); }} onStatus={statusMessage} />
-    : activeView === "library"
-    ? <LibraryView settings={settings} onSettings={updateSettings} onStatus={statusMessage} history={history} conversionTimings={conversionTimings} onClearHistory={handleClearHistory} onRemoveHistoryItem={handleRemoveHistoryItem} />
-    : activeView === "hardware"
-      ? <HardwarePipelineView runtime={runtime} settings={settings} active={Boolean(jobId) || captureBusy} progress={progress} progressMessage={status} />
-    : activeView === "console"
-      ? (
-        <ConsoleView
-          events={events}
-          rawEvents={rawEvents}
-          jobId={jobId || undefined}
-          running={Boolean(jobId) || captureBusy}
-          paused={paused}
-          progress={progress}
-          sourceTitle={activeJobContextRef.current?.source || selectedCapture?.name || ""}
-          outputDir={activeJobContextRef.current?.exportedPath || settings.outputDir}
-          category={settings.category}
-          format={settings.format}
-          settings={activeJobContextRef.current?.effectiveSettings || settings}
-          initialMode="in_progress"
-          historyItems={history}
-          conversionTimings={conversionTimings}
-          onPauseToggle={pauseToggle}
-          onAbort={cancel}
-          onClear={(targetJobId?: string) => {
-            if (targetJobId) {
-              setEvents((prev) => prev.filter((e) => e.jobId !== targetJobId));
-              if (jobId === targetJobId) {
-                setJobId("");
-                setProgress(0);
-              }
-            } else {
-              setEvents([]);
-              setJobId("");
-              setProgress(0);
-            }
-          }}
-          onClearRaw={() => {
-            setRawEvents([]);
-          }}
-          onStatus={statusMessage}
-          onNavigateToConverter={() => setActiveView("converter")}
-          onNavigateToLibrary={() => setActiveView("library")}
-          onRestoreSession={(item) => {
-            const syntheticEvents: ConverterEvent[] = [
-              { jobId: item.id, kind: "started", message: `[*] Conversion: ${item.fileName || item.source}` },
-              { jobId: item.id, kind: "log", message: `Ready! File exported to: ${item.fileName || item.exportPath}` },
-              { jobId: item.id, kind: "log", message: `DONE! Exported: ${item.exportPath}` },
-              { jobId: item.id, kind: "finished", message: "Conversion finished. Your media is ready.", output: item.exportPath },
-            ];
-            setEvents((prev) => [...prev, ...syntheticEvents]);
-            setRawEvents((prev) => [...prev, ...syntheticEvents]);
-          }}
-          onRetryItem={async (item) => {
-            const mediaUrl = item.url || extractYouTubeUrlFromThumbnail(item.thumbnail);
-            if (Boolean(jobId)) {
-              try {
-                const requeued = await bridge.requeueTrack(item.index, mediaUrl);
-                if (requeued) {
-                  statusMessage(`Requeuing #${item.index} as next conversion: ${item.title}...`);
-                  const syntheticEvents: ConverterEvent[] = [
-                    { jobId: jobId || item.id, kind: "log", message: `[*] Requeuing track #${item.index} as next conversion: ${item.title}` },
-                  ];
-                  setEvents((prev) => [...prev, ...syntheticEvents]);
-                  setRawEvents((prev) => [...prev, ...syntheticEvents]);
-                  return;
-                }
-              } catch (err) {
-                console.warn("Could not requeue track into active engine:", err);
-              }
-            }
-            if (mediaUrl) {
-              statusMessage(`Retrying: ${item.title}...`);
-              await start(mediaUrl);
-            } else if (activeJobContextRef.current?.source) {
-              statusMessage(`Retrying #${item.index}: ${item.title}...`);
-              await start(activeJobContextRef.current.source, String(item.index));
-            } else {
-              statusMessage(`Could not resolve URL to retry ${item.title}`);
-            }
-          }}
-        />
-      )
-      : activeView === "settings"
-        ? (
-          <SettingsView
-            runtime={runtime}
-            settings={settings}
-            onSettings={updateSettings}
-            accentColor={accentColor}
-            bgColor={bgColor}
-            bgMode={bgMode}
-            wallpaper={wallpaper}
-            wallpaperBlur={wallpaperBlur}
-            wallpaperMaskColor={wallpaperMaskColor}
-            wallpaperMaskOpacity={wallpaperMaskOpacity}
-            sidebarColor={sidebarColor}
-            sidebarOpacity={sidebarOpacity}
-            onAccentColorChange={handleAccentChange}
-            onBgColorChange={handleBgChange}
-            onBgModeChange={setBgMode}
-            onWallpaperChange={setWallpaper}
-            onWallpaperBlurChange={setWallpaperBlur}
-            onWallpaperMaskColorChange={setWallpaperMaskColor}
-            onWallpaperMaskOpacityChange={setWallpaperMaskOpacity}
-            onSidebarColorChange={setSidebarColor}
-            onSidebarOpacityChange={setSidebarOpacity}
-            onResetColors={handleResetAppearance}
-            onResetAppearance={handleResetAppearance}
-            onSaveAppearance={handleSaveAppearance}
-            onStatus={statusMessage}
-            updateResult={updateResult}
-            onCheckUpdates={handleCheckUpdates}
-            isCheckingUpdates={isCheckingUpdates}
-            onOpenChangesModal={() => setShowUpdateModal(true)}
-          />
-        )
-        : null;
+    const secondaryContent = activeView === "settings" ? (
+    <SettingsView
+      runtime={runtime}
+      settings={settings}
+      onSettings={updateSettings}
+      accentColor={accentColor}
+      bgColor={bgColor}
+      bgMode={bgMode}
+      wallpaper={wallpaper}
+      wallpaperBlur={wallpaperBlur}
+      wallpaperMaskColor={wallpaperMaskColor}
+      wallpaperMaskOpacity={wallpaperMaskOpacity}
+      sidebarColor={sidebarColor}
+      sidebarOpacity={sidebarOpacity}
+      onAccentColorChange={setAccentColor}
+      onBgColorChange={setBgColor}
+      onBgModeChange={setBgMode}
+      onWallpaperChange={setWallpaper}
+      onWallpaperBlurChange={setWallpaperBlur}
+      onWallpaperMaskColorChange={setWallpaperMaskColor}
+      onWallpaperMaskOpacityChange={setWallpaperMaskOpacity}
+      onSidebarColorChange={setSidebarColor}
+      onSidebarOpacityChange={setSidebarOpacity}
+      onResetColors={() => {
+        setAccentColor("#c52b68");
+        setBgColor("#02000a");
+        setSidebarColor("#05040d");
+        setSidebarOpacity(45);
+      }}
+      onResetAppearance={handleResetAppearance}
+      onSaveAppearance={handleSaveAppearance}
+      onStatus={statusMessage}
+    />
+  ) : null;
 
   return (
     <div
@@ -1114,15 +1026,8 @@ export default function App() {
           sidebarOpacity={sidebarOpacity}
         />
         <div className="relative flex min-w-0 flex-1 flex-col h-full overflow-hidden">
-        <UpdatePromptHeader
-          updateResult={updateResult}
-          dismissed={updateDismissed}
-          onOpenChanges={() => setShowUpdateModal(true)}
-          onDismiss={() => setUpdateDismissed(true)}
-          installing={installingUpdate}
-          onInstall={() => void handleInstallUpdate()}
-        />
-        <main className={`min-h-0 flex-1 px-8 py-6 ${activeView === "console" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
+
+        <main className="min-h-0 flex-1 px-8 py-6 overflow-y-auto">
           <div className={activeView === "converter" ? "block" : "hidden"}>
             <ConverterView
               settings={settings}
@@ -1154,7 +1059,7 @@ export default function App() {
           {activeView !== "converter" && (
             <div
               key={activeView}
-              className={activeView === "console" ? "flex flex-col flex-1 min-h-0 h-full" : "h-full"}
+              className="h-full"
             >
               {secondaryContent}
             </div>
@@ -1330,14 +1235,7 @@ export default function App() {
           </section>
         </div>
       )}
-      <UpdateChangesModal
-        open={showUpdateModal}
-        onClose={() => setShowUpdateModal(false)}
-        updateResult={updateResult}
-        installing={installingUpdate}
-        onInstall={() => void handleInstallUpdate()}
-        theme={theme}
-      />
+
     </div>
   );
 }

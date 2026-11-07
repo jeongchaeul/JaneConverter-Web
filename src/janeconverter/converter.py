@@ -50,6 +50,7 @@ from .constants import (
     sanitize_time_offset,
     parse_time_offset_seconds,
 )
+from .policy import DEFAULT_POLICY
 from .binaries import (
     ENGINE_DIR,
     PROJECT_ROOT,
@@ -629,7 +630,7 @@ def build_ffmpeg_args(
                 cmd.extend(["-vn", "-c:a", "copy"])
         elif target_format in SUPPORTED_VIDEO_FORMATS:
             cmd.extend(["-c:v", "copy", "-c:a", "copy"])
-        cmd.extend(["-threads", "0"])
+        cmd.extend(["-threads", str(DEFAULT_POLICY.ffmpeg_threads)])
         cmd.append(output_path)
         return cmd
 
@@ -952,7 +953,7 @@ def build_ffmpeg_args(
     else:
         raise ValueError(f"Unsupported conversion format: '{target_format}'")
 
-    cmd.extend(["-threads", "0"])
+    cmd.extend(["-threads", str(DEFAULT_POLICY.ffmpeg_threads)])
     cmd.append(output_path)
     return cmd
 
@@ -1144,7 +1145,7 @@ def _convert_media_impl(
                 cmd.extend(["-vn", "-c:a", "copy"])
             else:
                 cmd.extend(["-c", "copy"])
-            cmd.extend(["-threads", "0", destination_path])
+            cmd.extend(["-threads", str(DEFAULT_POLICY.ffmpeg_threads), destination_path])
             res = subprocess.run(
                 cmd,
                 stdin=subprocess.DEVNULL,

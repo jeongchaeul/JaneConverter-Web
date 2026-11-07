@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+export type UnlistenFn = () => void;
 
 export type Category = "Audio" | "Music" | "Video" | "Image" | "Miscellaneous";
 export type EventKind = "started" | "log" | "progress" | "status" | "finished" | "partial" | "failed" | "cancelled";
@@ -454,80 +453,185 @@ const demoBridge: JaneBridge = {
   async windowIsMaximized() { return false; },
 };
 
-const isTauriRuntime = () => "__TAURI_INTERNALS__" in window;
+const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "/api/v1";
 
-const tauriBridge: JaneBridge = {
-  conversionHistory: (legacy = [], entry, remove, clear = false) => invoke("conversion_history", { legacy, entry: entry ?? null, remove: remove ?? null, clear }),
-  runtimeInfo: () => invoke<RuntimeInfo>("runtime_info"),
-  hardwareSnapshot: () => invoke<HardwareSnapshot>("hardware_snapshot"),
-  settingsGet: () => invoke<ConverterSettings>("settings_get"),
-  settingsSave: (settings) => invoke<void>("settings_save", { settings }),
-  setDataRoot: (path) => invoke<string>("set_data_root_path", { path }),
-  chooseFile: () => invoke<string | null>("choose_file"),
-  chooseFiles: () => invoke<string[]>("choose_files"),
-  chooseFolder: () => invoke<string | null>("choose_folder"),
-  chooseFlpFile: () => invoke<string | null>("choose_flp_file"),
-  chooseAlsFile: () => invoke<string | null>("choose_als_file"),
-  flpDetectInstalled: () => invoke<InstalledFlStudio[]>("flp_detect_installed"),
-  flpInspect: (path: string) => invoke<FlpProjectInfo>("flp_inspect", { path }),
-  flpDowngrade: (source: string, targetVersion: string, targetBuild?: number, outputPath?: string, overwrite?: boolean) =>
-    invoke<FlpDowngradeResult>("flp_downgrade", {
-      source,
-      targetVersion,
-      targetBuild: targetBuild ?? null,
-      outputPath: outputPath ?? null,
-      overwrite: overwrite ?? null,
-    }),
-  openPath: (path) => invoke<void>("open_path", { path }),
-  openFile: (path) => invoke<void>("open_file", { path }),
-  openUrl: (url) => invoke<void>("open_url", { url }),
-  startConversion: (request) => invoke<string>("start_conversion", { request }),
-  requeueTrack: (index, url) => invoke<boolean>("requeue_track", { index, url: url ?? null }),
-  captureFacebookAlbum: (source, captureId) => invoke<FacebookCaptureResult>("capture_facebook_album", { source, captureId }),
-  cancelFacebookAlbum: (captureId) => invoke<void>("cancel_facebook_album", { captureId }),
-  captureSocialPostPhotos: (source, captureId) => invoke<SocialCaptureResult>("capture_social_post_photos", { source, captureId }),
-  cancelSocialPostPhotos: (captureId) => invoke<void>("cancel_social_post_photos", { captureId }),
-  pauseConversion: (jobId) => invoke<void>("pause_conversion", { jobId }),
-  resumeConversion: (jobId) => invoke<void>("resume_conversion", { jobId }),
-  cancelConversion: (jobId) => invoke<void>("cancel_conversion", { jobId }),
-  loadPlaylist: (source) => invoke<PlaylistCatalog>("load_playlist", { source }),
-  cancelPlaylist: () => invoke<void>("cancel_playlist"),
-  subscribe: (listener) => listen<ConverterEvent>("converter-event", (event) => listener(event.payload)),
-  scanLibrary: (path) => invoke<LibraryEntry[]>("scan_library", { path }),
-  isConvertedLibraryPath: (path) => invoke<boolean>("is_converted_library_path", { path }),
-  recentConversions: (path, limit) => invoke<LibraryEntry[]>("recent_conversions", { path, limit }),
-  clearConversionTimings: () => invoke<void>("clear_conversion_timings"),
-  dragLibraryFile: (path) => invoke<void>("drag_library_file", { path }),
-  getThumbnail: (root, path) => invoke<string | null>("get_thumbnail", { root, path }),
-  moveLibrary: (source, destinationParent) => invoke<MoveDirectoryResult>("move_library", { source, destinationParent }),
-  moveFetchedFolder: (source, destinationParent) => invoke<MoveDirectoryResult>("move_fetched_folder", { source, destinationParent }),
-  deleteLibraryEntry: (root, path) => invoke<void>("delete_library_entry", { root, path }),
-  createAccessLink: (source) => invoke<AccessStatus>("create_access_link", { source }),
-  accessStatus: () => invoke<AccessStatus>("access_status"),
-  fetchedMedia: () => invoke<FetchedMedia[]>("fetched_media"),
-  accessDiagnostics: () => invoke<AccessDiagnostic[]>("access_diagnostics"),
-  fetchedMediaThumbnail: (path) => invoke<string | null>("fetched_media_thumbnail", { path }),
-  discardFetchedMedia: (path) => invoke<void>("discard_fetched_media", { path }),
-  clearAccessLink: () => invoke<void>("clear_access_link"),
-  relaunch: () => invoke<void>("relaunch"),
-  notifyAttention: () => invoke<void>("notify_attention"),
-  checkUpdates: () => invoke<UpdateCheckResult>("check_updates"),
-  installUpdate: () => invoke<void>("install_update"),
-  exportLogFile: (content: string, defaultFilename?: string) =>
-    invoke<string | null>("export_log_file", { content, defaultFilename: defaultFilename ?? null }),
-  setTaskbarProgress: (progress, status) =>
-    invoke<void>("set_taskbar_progress", {
-      progress: progress !== undefined ? Math.round(progress) : null,
-      status: status ?? null,
-    }),
-  getChromiumCookiePolicy: () => invoke<boolean>("get_chromium_cookie_policy"),
-  setChromiumCookiePolicy: (enabled: boolean) => invoke<boolean>("set_chromium_cookie_policy", { enabled }),
-  pathSize: (path: string) => invoke<number>("path_size", { path }),
-  windowMinimize: () => invoke<void>("window_minimize"),
-  windowStartDragging: () => invoke<void>("window_start_dragging"),
-  windowToggleMaximize: () => invoke<boolean>("window_toggle_maximize"),
-  windowClose: () => invoke<void>("window_close"),
-  windowIsMaximized: () => invoke<boolean>("window_is_maximized"),
+const eventListeners = new Set<(event: ConverterEvent) => void>();
+const activeEventSources = new Map<string, EventSource>();
+
+export const webBridge: JaneBridge = {
+  ...demoBridge,
+  async runtimeInfo(): Promise<RuntimeInfo> {
+    try {
+      const res = await fetch(`${API_BASE}/runtime`);
+      if (res.ok) {
+        return {
+          mode: "browser",
+          pythonReady: true,
+          ffmpegReady: true,
+          ffmpegPath: "System FFmpeg (Web Worker)",
+          pythonPath: "Python 3.12 (Server)",
+          dataRoot: "Web Storage",
+          projectRoot: "Web Server",
+          gpuAvailable: false,
+          gpuLabel: "Cloud CPU (Web Lite)",
+          packaged: true,
+        };
+      }
+    } catch {
+      // Fallback
+    }
+    return demoBridge.runtimeInfo();
+  },
+  async loadPlaylist(source: string): Promise<PlaylistCatalog> {
+    const res = await fetch(`${API_BASE}/playlist/inspect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: source }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to inspect playlist" }));
+      throw new Error(err.detail || "Failed to inspect playlist");
+    }
+    const data = await res.json();
+    return {
+      title: data.playlist_title,
+      items: (data.entries || []).map((e: any) => ({
+        index: e.index,
+        title: e.title,
+        artist: e.artist,
+        duration: e.duration_str,
+        url: e.url,
+        thumbnail: e.thumbnail,
+      })),
+    };
+  },
+  async startConversion(request: ConversionRequest): Promise<string> {
+    const isPlaylist = request.source.includes("list=") || request.source.includes("/album/") || request.source.includes("/playlist/") || request.source.includes("/sets/");
+    const payload = {
+      source_url: request.source.startsWith("http://") || request.source.startsWith("https://") ? request.source : null,
+      upload_id: request.source.startsWith("upload:") ? request.source.slice(7) : null,
+      target_format: request.format,
+      audio_bitrate: request.bitrate || request.audioBitrate || "320k",
+      resolution: request.resolution || "1080p",
+      normalize_audio: !!request.normalize,
+      reconstruct_frequency_loss: !!request.reconstructFrequencyLoss,
+      start_time: request.startTime || null,
+      end_time: request.endTime || null,
+      is_playlist: isPlaylist,
+    };
+
+    const res = await fetch(`${API_BASE}/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to create conversion job" }));
+      throw new Error(err.detail || "Failed to create conversion job");
+    }
+
+    const job = await res.json();
+    const jobId = job.id;
+
+    const sse = new EventSource(`${API_BASE}/jobs/${jobId}/events`);
+    activeEventSources.set(jobId, sse);
+
+    sse.onmessage = (msg) => {
+      try {
+        const data = JSON.parse(msg.data);
+        const statusMap: Record<string, EventKind> = {
+          queued: "status",
+          downloading: "progress",
+          converting: "progress",
+          completed: "finished",
+          failed: "failed",
+          cancelled: "cancelled",
+        };
+        const kind: EventKind = statusMap[data.status] || "status";
+        const evt: ConverterEvent = {
+          jobId,
+          kind,
+          progress: Math.round(data.progress * 100),
+          message: data.step,
+          output: data.filename || undefined,
+        };
+
+        eventListeners.forEach((fn) => fn(evt));
+
+        if (data.status === "completed" && data.download_url) {
+          sse.close();
+          activeEventSources.delete(jobId);
+          const a = document.createElement("a");
+          a.href = data.download_url;
+          a.download = data.filename || "converted_media";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        } else if (data.status === "failed" || data.status === "cancelled") {
+          sse.close();
+          activeEventSources.delete(jobId);
+        }
+      } catch (e) {
+        console.error("SSE parse error", e);
+      }
+    };
+
+    sse.onerror = () => {
+      sse.close();
+      activeEventSources.delete(jobId);
+    };
+
+    return jobId;
+  },
+  async cancelConversion(jobId: string): Promise<void> {
+    const sse = activeEventSources.get(jobId);
+    if (sse) {
+      sse.close();
+      activeEventSources.delete(jobId);
+    }
+    await fetch(`${API_BASE}/jobs/${jobId}`, { method: "DELETE" }).catch(() => {});
+  },
+  async subscribe(listener: (event: ConverterEvent) => void): Promise<UnlistenFn> {
+    eventListeners.add(listener);
+    return () => {
+      eventListeners.delete(listener);
+    };
+  },
+  async chooseFile(): Promise<string | null> {
+    return new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.onchange = async () => {
+        if (!input.files || input.files.length === 0) {
+          resolve(null);
+          return;
+        }
+        const file = input.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          const res = await fetch(`${API_BASE}/uploads`, {
+            method: "POST",
+            body: formData,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            resolve(`upload:${data.upload_id}`);
+            return;
+          }
+        } catch (e) {
+          console.error("Upload error", e);
+        }
+        resolve(null);
+      };
+      input.click();
+    });
+  },
+  async chooseFiles(): Promise<string[]> {
+    const f = await webBridge.chooseFile();
+    return f ? [f] : [];
+  },
 };
 
-export const bridge: JaneBridge = isTauriRuntime() ? tauriBridge : demoBridge;
+export const bridge: JaneBridge = webBridge;

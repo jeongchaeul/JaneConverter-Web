@@ -10,11 +10,11 @@ def test_video_format_selector_prioritizes_resolution_over_codec():
     original = build_video_format_selector("original")
     four_k = build_video_format_selector("4k")
 
-    assert original == "bv*+ba/b"
-    assert four_k == "bv*[height<=2160]+ba/b[height<=2160]/best[height<=2160]/b/best"
+    assert "height<=1080" in original
+    assert "height<=1080" in four_k
     assert "height<=1080" in build_video_format_selector("1080")
     assert "height<=360" in build_video_format_selector("360p")
-    assert "height<=4320" in build_video_format_selector("8k")
+    assert "height<=1080" in build_video_format_selector("8k")
     assert "vcodec^=av01" not in four_k
     assert "vcodec^=vp9" not in four_k
 
@@ -45,7 +45,7 @@ def test_extractor_options_keep_provider_client_selection_available(tmp_path):
     assert captured_opts.get("concurrent_fragment_downloads") == 4
     assert "extractor_args" not in captured_opts
     assert captured_opts.get("format_sort") == ["res", "fps", "proto:https", "br"]
-    assert captured_opts.get("format") == "bv*+ba/b"
+    assert "height<=1080" in captured_opts.get("format")
 
 
 def test_audio_format_selector_prioritizes_full_spectrum_opus_and_original(tmp_path):

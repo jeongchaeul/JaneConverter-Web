@@ -20,13 +20,12 @@ describe("Sidebar layout", () => {
     expect(nav?.nextElementSibling?.className).toContain("mt-4");
     expect(nav?.nextElementSibling?.className).not.toContain("mt-auto");
 
-    // The compressed utility dock contains Hardware, Settings, and Collapse sidebar
+    // The utility dock contains Settings and Collapse sidebar
     const toolbar = container.querySelector('[role="toolbar"]');
     expect(toolbar).not.toBeNull();
     const toolbarButtons = toolbar?.querySelectorAll("button");
-    expect(toolbarButtons?.item(0)?.getAttribute("aria-label")).toBe("Hardware & Pipeline");
-    expect(toolbarButtons?.item(1)?.getAttribute("aria-label")).toBe("Settings");
-    expect(toolbarButtons?.item(2)?.getAttribute("aria-label")).toBe("Collapse sidebar");
+    expect(toolbarButtons?.item(0)?.getAttribute("aria-label")).toBe("Settings");
+    expect(toolbarButtons?.item(1)?.getAttribute("aria-label")).toBe("Collapse sidebar");
 
     await act(async () => { root.unmount(); });
     container.remove();
@@ -50,20 +49,12 @@ describe("Sidebar layout", () => {
     await act(async () => { toggle?.click(); });
     expect(aside?.dataset.collapsed).toBe("true");
     expect(container.querySelector('button[aria-label="Expand sidebar"]')).not.toBeNull();
-    expect(container.querySelector('button[title="Converted library"]')).not.toBeNull();
-    expect(container.textContent).not.toContain("Project-local workspace");
-
-    await act(async () => { container.querySelector<HTMLButtonElement>('button[aria-label="Expand sidebar"]')?.click(); });
-    expect(aside?.dataset.collapsed).toBe("false");
-    expect(container.textContent).toContain("Project-local workspace");
-    expect(window.localStorage.getItem("janecoverter.sidebar.collapsed")).toBe("false");
 
     await act(async () => { root.unmount(); });
-    window.localStorage.removeItem("janecoverter.sidebar.collapsed");
     container.remove();
   });
 
-  it("handles clicking compressed utility buttons and applies glass styling", async () => {
+  it("handles clicking utility buttons and applies glass styling", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -72,7 +63,7 @@ describe("Sidebar layout", () => {
     await act(async () => {
       root.render(
         <Sidebar
-          activeView="hardware"
+          activeView="settings"
           onChange={handleChange}
           sidebarColor="#12071a"
           sidebarOpacity={50}
@@ -83,10 +74,8 @@ describe("Sidebar layout", () => {
     const aside = container.querySelector("aside");
     expect(aside?.getAttribute("style")).toContain("rgba(18, 7, 26, 0.5)");
 
-    const hardwareBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Hardware & Pipeline"]');
     const settingsBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Settings"]');
-    expect(hardwareBtn?.getAttribute("aria-current")).toBe("page");
-    expect(settingsBtn?.getAttribute("aria-current")).toBeNull();
+    expect(settingsBtn?.getAttribute("aria-current")).toBe("page");
 
     await act(async () => {
       settingsBtn?.click();

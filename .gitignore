@@ -48,3 +48,4 @@ quarantine/
 tasks/
 .kilo/
 tests/tmp_live_verify/
+temp_web_jobs/

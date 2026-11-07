@@ -99,75 +99,11 @@ describe("Settings updates", () => {
     container.remove();
   });
 
-  it("offers a relaunch action for the current desktop application", async () => {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
 
-    await act(async () => {
-      root.render(<SettingsView runtime={sourceRuntime} onStatus={vi.fn()} initialTab="hardware" />);
-    });
 
-    const relaunchButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Relaunch now"));
-    expect(relaunchButton).toBeDefined();
-    await act(async () => {
-      relaunchButton?.click();
-      await Promise.resolve();
-    });
 
-    expect(relaunch.run).toHaveBeenCalled();
 
-    await act(async () => { root.unmount(); });
-    container.remove();
-  });
 
-  it("changes the application data root and relaunches", async () => {
-    chooseFolder.run.mockResolvedValue("E:/JaneConverterData");
-    setDataRoot.run.mockResolvedValue("E:/JaneConverterData");
-
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(<SettingsView runtime={{ ...sourceRuntime, dataRoot: "C:/Users/User/AppData/Local/JaneConverter" }} onStatus={vi.fn()} initialTab="hardware" />);
-    });
-
-    await act(async () => {
-      Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Browse")?.click();
-      await Promise.resolve();
-    });
-    expect(chooseFolder.run).toHaveBeenCalled();
-
-    await act(async () => {
-      Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Apply and relaunch"))?.click();
-      await Promise.resolve();
-    });
-
-    expect(setDataRoot.run).toHaveBeenCalledWith("E:/JaneConverterData");
-    expect(relaunch.run).toHaveBeenCalled();
-    expect(container.textContent).toContain("Data root changed to E:/JaneConverterData.");
-
-    await act(async () => { root.unmount(); });
-    container.remove();
-  });
-
-  it("identifies production packages and keeps relaunch available", async () => {
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(<SettingsView runtime={{ mode: "tauri", pythonReady: true, ffmpegReady: true, ffmpegPath: "resources/runtime/bin/ffmpeg", pythonPath: "resources/runtime/engine/JaneConverterEngine", dataRoot: "/home/user/.local/share/JaneConverter", projectRoot: "resources/runtime", gpuAvailable: false, gpuLabel: "CPU mode", packaged: true }} onStatus={vi.fn()} initialTab="hardware" />);
-    });
-
-    expect(container.textContent).toContain("Running from a production package");
-    expect(container.textContent).toContain("Relaunch now");
-    expect(container.textContent).toContain("OS user-data directory");
-
-    await act(async () => { root.unmount(); });
-    container.remove();
-  });
 
   it("triggers accent and background color changes from pickers and reset button", async () => {
     const onAccentColorChange = vi.fn();
@@ -239,134 +175,9 @@ describe("Settings updates", () => {
     await act(async () => { root.unmount(); });
     container.remove();
   });
-  it("toggles Adaptive GPU Acceleration and shows the foolproof explanation", async () => {
-    const onSettings = vi.fn();
-    const onStatus = vi.fn();
-    const initialSettings = {
-      category: "Audio" as const,
-      format: "MP3",
-      bitrate: "320k",
-      sampleRate: 48000,
-      resolution: "original",
-      outputDir: "./converted",
-      fetchedDir: "./fetched",
-      retries: 2,
-      useGpu: false,
-      saveCover: false,
-      saveMetadata: true,
-      normalize: false,
-      cookiesBrowser: "none",
-      cookiesFile: "",
-      cookies: "",
-    };
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
 
-    await act(async () => {
-      root.render(
-        <SettingsView
-          runtime={{ ...sourceRuntime, gpuAvailable: true, gpuLabel: "NVIDIA GeForce RTX 5060" }}
-          settings={initialSettings}
-          onSettings={onSettings}
-          onStatus={onStatus}
-          initialTab="hardware"
-        />,
-      );
-    });
 
-    expect(container.textContent).toContain("Adaptive GPU Acceleration");
-    expect(container.textContent).toContain("1. Speeds up video encoding");
-    expect(container.textContent).toContain("2. Skips when not needed");
-    expect(container.textContent).toContain("3. Automatic CPU safety net");
 
-    const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Adaptive GPU Acceleration"]');
-    expect(toggle).toBeDefined();
-    expect(toggle?.getAttribute("aria-checked")).toBe("false");
-
-    await act(async () => {
-      toggle?.click();
-      await Promise.resolve();
-    });
-
-    expect(onSettings).toHaveBeenCalledWith({ ...initialSettings, useGpu: true });
-    expect(onStatus).toHaveBeenCalledWith(expect.stringContaining("Adaptive GPU Acceleration enabled"));
-
-    await act(async () => { root.unmount(); });
-    container.remove();
-  });
-
-  it("toggles readBrowserCookies and shows detailed explanations for ON and OFF states", async () => {
-    const onSettings = vi.fn();
-    const onStatus = vi.fn();
-    const initialSettings = {
-      category: "Audio" as const,
-      format: "MP3",
-      bitrate: "320k",
-      sampleRate: 48000,
-      resolution: "original",
-      outputDir: "./converted",
-      fetchedDir: "./fetched",
-      retries: 2,
-      useGpu: false,
-      saveCover: false,
-      saveMetadata: true,
-      normalize: false,
-      readBrowserCookies: false,
-    };
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(
-        <SettingsView
-          runtime={sourceRuntime}
-          settings={initialSettings}
-          onSettings={onSettings}
-          onStatus={onStatus}
-        />,
-      );
-    });
-
-    expect(container.textContent).toContain("Read Browser Cookies (Session Recovery)");
-    expect(container.textContent).toContain("Disabled (Air-Gap Mode)");
-    expect(container.textContent).toContain("What works when disabled");
-    expect(container.textContent).toContain("What won't work when disabled");
-    expect(container.textContent).toContain("Friends-only Facebook Reels & posts");
-
-    const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Read browser cookies for session recovery"]');
-    expect(toggle).toBeDefined();
-    expect(toggle?.getAttribute("aria-checked")).toBe("false");
-
-    await act(async () => {
-      toggle?.click();
-      await Promise.resolve();
-    });
-
-    expect(onSettings).toHaveBeenCalledWith({ ...initialSettings, readBrowserCookies: true });
-    expect(onStatus).toHaveBeenCalledWith(expect.stringContaining("Browser session cookie reading enabled"));
-
-    // Now render with readBrowserCookies: true
-    await act(async () => {
-      root.render(
-        <SettingsView
-          runtime={sourceRuntime}
-          settings={{ ...initialSettings, readBrowserCookies: true }}
-          onSettings={onSettings}
-          onStatus={onStatus}
-        />,
-      );
-    });
-
-    expect(container.textContent).toContain("Enabled (Session Recovery)");
-    expect(container.textContent).toContain("What works when enabled");
-    expect(container.textContent).toContain("Local-only privacy guarantees");
-    expect(container.textContent).toContain("RAM only (ephemeral)");
-
-    await act(async () => { root.unmount(); });
-    container.remove();
-  });
 
   it('renders the User Manual guide and allows tab navigation', async () => {
     const container = document.createElement('div');

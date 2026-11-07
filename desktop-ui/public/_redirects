@@ -1,0 +1,3 @@
+# Cloudflare Pages 200 Proxy rule:
+# Transparently routes all frontend API calls (/api/*) directly to the Hugging Face Spaces backend container.
+/api/*  https://YOUR-HF-SPACE-NAME.hf.space/api/:splat  200

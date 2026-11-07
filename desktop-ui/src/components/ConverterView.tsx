@@ -52,8 +52,6 @@ import {
   videoQualityLabel,
 } from "../options";
 import { PlaylistDialog } from "./PlaylistDialog";
-import { FlpConverterView } from "./FlpConverterView";
-import { StoryTermsModal } from "./StoryTermsModal";
 import { type QueueItem, createQueueItems } from "./converter/queueUtils";
 import { ConverterQueue } from "./converter/ConverterQueue";
 import { ActionBar } from "./converter/ActionBar";
@@ -318,7 +316,7 @@ export function ConverterView({
     const trimmedSource = sourceToConvert.trim();
     if (!trimmedSource && !access.bridgeConnected) return false;
     if (trimmedSource && isEphemeralStoryUrl(trimmedSource) && !settings.allowStoryExtraction) {
-      setShowStoryTermsModal(true);
+      onStatusRef.current("Story extraction is available in the JaneConverter Desktop application.");
       onStatus("Ephemeral story extraction requires accepting the Terms of Usage and legal compliance agreement.");
       return false;
     }
@@ -572,7 +570,7 @@ export function ConverterView({
       return;
     }
     if (isEphemeralStoryUrl(clean) && !settings.allowStoryExtraction) {
-      setShowStoryTermsModal(true);
+      onStatusRef.current("Story extraction is available in the JaneConverter Desktop application.");
       onStatus("Ephemeral story extraction requires accepting the Terms of Usage and legal compliance agreement.");
       return;
     }
@@ -836,54 +834,8 @@ export function ConverterView({
   const handleDroppedPathsRef = useRef(handleDroppedPaths);
   handleDroppedPathsRef.current = handleDroppedPaths;
 
-  // Native Tauri drag-and-drop listener
-  useEffect(() => {
-    let isMounted = true;
-    let unlistenFn: (() => void) | undefined;
-    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-      void import("@tauri-apps/api/webview")
-        .then(({ getCurrentWebview }) => {
-          if (!isMounted) return;
-          return getCurrentWebview().onDragDropEvent((event) => {
-            if (!isMounted) return;
-            if (event.payload.type === "over" || event.payload.type === "enter") {
-              setIsDraggingOver(true);
-            } else if (event.payload.type === "leave") {
-              setIsDraggingOver(false);
-            } else if (event.payload.type === "drop") {
-              setIsDraggingOver(false);
-              if (event.payload.paths && event.payload.paths.length > 0) {
-                if (converterTabRef.current === "flp") {
-                  const daw = event.payload.paths.find((p) => {
-                    const lower = p.toLowerCase();
-                    return lower.endsWith(".flp") || lower.endsWith(".als");
-                  });
-                  if (daw) {
-                    setDroppedFlpPath(daw);
-                  } else {
-                    onStatusRef.current("Please drop a valid .flp or .als project file.");
-                  }
-                } else {
-                  void handleDroppedPathsRef.current(event.payload.paths);
-                }
-              }
-            }
-          });
-        })
-        .then((unlisten) => {
-          if (!isMounted) {
-            unlisten?.();
-          } else {
-            unlistenFn = unlisten;
-          }
-        })
-        .catch(() => {});
-    }
-    return () => {
-      isMounted = false;
-      unlistenFn?.();
-    };
-  }, []);
+  // Web drag & drop is handled natively
+  useEffect(() => {}, []);
 
   async function browseOutput() {
     if (isBrowsingRef.current) return;
@@ -914,7 +866,7 @@ export function ConverterView({
     }
     const isStory = isEphemeralStoryUrl(source.trim());
     if (isStory && !settings.allowStoryExtraction) {
-      setShowStoryTermsModal(true);
+      onStatusRef.current("Story extraction is available in the JaneConverter Desktop application.");
       onStatus("Ephemeral story extraction requires accepting the Terms of Usage and legal compliance agreement.");
       return;
     }
@@ -1200,7 +1152,7 @@ export function ConverterView({
       </div>
 
       {converterTab === "flp" ? (
-        <FlpConverterView onStatus={onStatus} initialFilePath={droppedFlpPath} />
+        <div className="panel p-8 text-center text-zinc-400"><p className="text-base font-medium text-white">Studio DAW Tools (FL Studio & Ableton)</p><p className="mt-2 text-xs text-zinc-500">DAW project downgrading and binary patching are available exclusively in the full JaneConverter Desktop application.</p></div>
       ) : (
         <>
           {/* Source Input Section */}
@@ -1674,15 +1626,7 @@ export function ConverterView({
           </div>
         </div>
       )}
-      <StoryTermsModal
-        isOpen={showStoryTermsModal}
-        accentColor={accentColor}
-        onClose={() => setShowStoryTermsModal(false)}
-        onConfirm={() => {
-          onSettings({ ...settings, allowStoryExtraction: true });
-          onStatus("Ephemeral stories extraction enabled. You can now convert this story.");
-        }}
-      />
+      
     </div>
   );
 }

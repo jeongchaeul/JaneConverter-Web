@@ -8,7 +8,9 @@ import {
 } from "lucide-react";
 import type { RuntimeInfo, UpdateCheckResult } from "../../bridge";
 import { bridge } from "../../bridge";
-import { isAppUpdateAvailable } from "../UpdatePromptHeader";
+function isAppUpdateAvailable(repoUpdate?: { has_update?: boolean } | null): boolean {
+  return Boolean(repoUpdate?.has_update);
+}
 
 export function SettingsSystemTab({
   runtime,

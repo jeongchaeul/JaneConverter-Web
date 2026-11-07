@@ -13,8 +13,6 @@ import unicodedata
 import urllib.parse
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
-import ipaddress
-import socket
 import json
 import html
 import requests
@@ -25,6 +23,8 @@ from .catalog_match import choose_catalog_match, match_score
 from .extraction_recovery import classify_extraction, ExtractionCategory
 from .extraction_recovery import extract_with_recovery
 from .converter import get_js_runtimes_config
+from .policy import DEFAULT_POLICY
+from .net_guard import is_safe_public_url, validate_url_or_raise
 
 class BrowserSessionError(RuntimeError):
     pass
@@ -322,22 +322,11 @@ __all__ = [
 
 
 def build_video_format_selector(resolution: str = "original") -> str:
-    """Build a yt-dlp selector that prioritizes source size over codec preference.
-
-    Codec-first selectors can choose a small AV1 or VP9 stream even when a larger
-    H.264/VP9 stream is available. The consumer-facing resolution choice should
-    limit the maximum size only when the user explicitly requests one.
-    """
+    """Build a yt-dlp selector capped at 1080p for Web Lite resource containment."""
     res_str = (resolution or "original").strip().lower()
-    if res_str in ("original", "source", "best", "max"):
-        return "bv*+ba/b"
+    clamped_res = DEFAULT_POLICY.clamp_resolution(res_str)
 
     max_heights = {
-        "8k": 4320,
-        "4k": 2160,
-        "2k": 1440,
-        "1440p": 1440,
-        "1440": 1440,
         "1080p": 1080,
         "1080": 1080,
         "720p": 720,
@@ -351,17 +340,18 @@ def build_video_format_selector(resolution: str = "original") -> str:
         "144p": 144,
         "144": 144,
     }
-    max_height = max_heights.get(res_str)
+    max_height = max_heights.get(clamped_res)
     if max_height is None:
-        m = re.match(r"^(\d+)p?$", res_str)
+        m = re.match(r"^(\d+)p?$", clamped_res)
         if m:
             try:
                 max_height = int(m.group(1))
             except ValueError:
                 pass
 
-    if max_height is None:
-        return "bv*+ba/b"
+    if max_height is None or max_height > DEFAULT_POLICY.max_video_height:
+        max_height = DEFAULT_POLICY.max_video_height
+
     return f"bv*[height<={max_height}]+ba/b[height<={max_height}]/best[height<={max_height}]/b/best"
 
 MAX_THUMBNAIL_BYTES = 15 * 1024 * 1024  # 15 MiB limit for cover art
@@ -372,40 +362,7 @@ MAX_REDIRECTS = 5
 
 def _is_safe_public_url(url: str) -> bool:
     """Verifies that URL uses http/https and does not resolve to private, loopback, or internal addresses."""
-    if not isinstance(url, str) or len(url) > 4096:
-        return False
-    try:
-        parsed = urllib.parse.urlsplit(url.strip())
-        if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
-            return False
-        hostname = (parsed.hostname or "").strip().lower().rstrip(".")
-        if not hostname:
-            return False
-        if hostname == "localhost" or hostname.endswith((".local", ".internal", ".localhost", ".onion")):
-            return False
-        if hostname.endswith((".test", ".example")):
-            return True
-        try:
-            addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        except socket.gaierror:
-            return False
-        if not addr_info:
-            return False
-        for _, _, _, _, sockaddr in addr_info:
-            ip_str = sockaddr[0]
-            ip = ipaddress.ip_address(ip_str)
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
-                return False
-        return True
-    except Exception:
-        return False
+    return is_safe_public_url(url)
 
 
 def resolve_entry_thumbnail(entry: Dict[str, Any], fallback_cover: str = "") -> str:
@@ -871,6 +828,8 @@ def fetch_media_stream(
     Fetches the media stream from a URL (or validates local file) into output_dir.
     Returns metadata dict with local path, title, artist, and media type.
     """
+    if is_url(source):
+        validate_url_or_raise(source)
     if is_ephemeral_story_url(source) and not allow_ephemeral_stories:
         raise ValueError(
             "Ephemeral story extraction is disabled by default. "
@@ -1548,6 +1507,8 @@ def fetch_playlist_entries(
     Supports Spotify playlists/albums, YouTube playlists, SoundCloud sets, and generic sources.
     """
     clean_url = url.strip()
+    if is_url(clean_url):
+        validate_url_or_raise(clean_url)
     if is_ephemeral_story_url(clean_url) and not allow_ephemeral_stories:
         raise ValueError(
             "Ephemeral story extraction is disabled by default. "

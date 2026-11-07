@@ -3,13 +3,11 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import { hexToRgba } from "../utils/appearanceStorage";
 
-export type ViewKey = "converter" | "fetched" | "library" | "hardware" | "console" | "settings";
+export type ViewKey = "converter" | "settings";
 
 const workspaceItems: Array<{ key: ViewKey; label: string; icon: typeof FileAudio }> = [
   { key: "converter", label: "Converter", icon: FileAudio },
-  { key: "fetched", label: "Media Capturer", icon: Inbox },
-  { key: "library", label: "Converted library", icon: FolderOpen },
-  { key: "console", label: "In Progress", icon: TerminalSquare },
+  { key: "settings", label: "Settings", icon: Settings2 },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = "janecoverter.sidebar.collapsed";
@@ -137,26 +135,7 @@ export function Sidebar({
         aria-label="System utilities"
       >
         {/* Hardware & Pipeline Button */}
-        <button
-          type="button"
-          aria-current={activeView === "hardware" ? "page" : undefined}
-          aria-label="Hardware & Pipeline"
-          title="Hardware & Pipeline"
-          onClick={() => onChange("hardware")}
-          className={[
-            "group relative flex items-center justify-center rounded-xl transition-all border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3b82f6]",
-            collapsed ? "size-10" : "h-11 flex-1",
-            activeView === "hardware"
-              ? "border-[var(--accent-color,#c52b68)] bg-white/[0.06] text-white shadow-[0_0_12px_var(--accent-glow,rgba(197,43,104,0.35))]"
-              : "border-white/[0.08] bg-white/[0.025] text-zinc-400 hover:border-white/20 hover:bg-white/[0.06] hover:text-zinc-200",
-          ].join(" ")}
-        >
-          <Cpu
-            className="size-4"
-            style={activeView === "hardware" ? { color: "var(--accent-color, #d75b88)" } : undefined}
-            strokeWidth={1.8}
-          />
-        </button>
+
 
         {/* Settings Button */}
         <button

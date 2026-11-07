@@ -12,7 +12,9 @@ from typing import Optional
 LOUDNORM_FILTER = "loudnorm=I=-14:TP=-1.5:LRA=11"
 
 # Universal safe protocol whitelist for FFmpeg/FFprobe to prevent protocol injection and SSRF
-SAFE_FFMPEG_PROTOCOLS = "file,http,https,tcp,tls,crypto,pipe"
+# Web Lite Security: restrict protocols strictly to local files and pipes.
+# Prevents FFmpeg HLS/concat/subfile SSRF vectors against internal network resources.
+SAFE_FFMPEG_PROTOCOLS = "file,pipe,crypto"
 
 SUPPORTED_AUDIO_FORMATS = {
     "mp3", "wav", "flac", "aac", "m4a", "ogg", "opus", "aiff", "aif",

@@ -1,11 +1,7 @@
 """Regression tests for bounded events, source routing, and safe update defaults."""
 
-import json
 import os
-import sys
-from pathlib import Path
 
-from janeconverter import cli
 from janeconverter.events import BoundedLogQueue, CoalescingCallbackQueue
 from janeconverter.extractor import identify_source_type, is_playlist_url
 from janeconverter.cli import CLI_CATEGORIES, media_library_folder, _metadata_folder
