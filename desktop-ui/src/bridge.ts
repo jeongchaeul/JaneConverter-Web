@@ -453,7 +453,11 @@ const demoBridge: JaneBridge = {
   async windowIsMaximized() { return false; },
 };
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "/api/v1";
+const API_BASE =
+  (import.meta as any).env?.VITE_API_BASE_URL ||
+  (typeof window !== "undefined" && window.location.hostname.includes("pages.dev")
+    ? "https://janeconverter-web.onrender.com/api/v1"
+    : "/api/v1");
 
 const eventListeners = new Set<(event: ConverterEvent) => void>();
 const activeEventSources = new Map<string, EventSource>();
@@ -507,9 +511,18 @@ export const webBridge: JaneBridge = {
   },
   async startConversion(request: ConversionRequest): Promise<string> {
     const isPlaylist = request.source.includes("list=") || request.source.includes("/album/") || request.source.includes("/playlist/") || request.source.includes("/sets/");
+    let cleanSource = request.source.trim();
+    if (
+      !cleanSource.startsWith("upload:") &&
+      !cleanSource.startsWith("http://") &&
+      !cleanSource.startsWith("https://") &&
+      (cleanSource.includes(".") || cleanSource.includes("/"))
+    ) {
+      cleanSource = `https://${cleanSource}`;
+    }
     const payload = {
-      source_url: request.source.startsWith("http://") || request.source.startsWith("https://") ? request.source : null,
-      upload_id: request.source.startsWith("upload:") ? request.source.slice(7) : null,
+      source_url: cleanSource.startsWith("http://") || cleanSource.startsWith("https://") ? cleanSource : null,
+      upload_id: cleanSource.startsWith("upload:") ? cleanSource.slice(7) : null,
       target_format: request.format || "source",
       category: request.category || "Music",
       audio_bitrate: request.bitrate || request.audioBitrate || "320k",
@@ -544,8 +557,18 @@ export const webBridge: JaneBridge = {
     }
 
     if (!res || !res.ok) {
-      const err = await res?.json().catch(() => ({ detail: "Failed to create conversion job. The server may be waking up, please try again." }));
-      throw new Error(err?.detail || (lastErr instanceof Error ? lastErr.message : "Failed to create conversion job."));
+      let errDetail = "";
+      try {
+        const errJson = await res?.json();
+        if (typeof errJson?.detail === "string") {
+          errDetail = errJson.detail;
+        } else if (Array.isArray(errJson?.detail)) {
+          errDetail = errJson.detail.map((d: any) => d.msg || JSON.stringify(d)).join(", ");
+        }
+      } catch {
+        // non-JSON
+      }
+      throw new Error(errDetail || (lastErr instanceof Error ? lastErr.message : "Failed to create conversion job. The server may be waking up, please try again."));
     }
 
     const job = await res.json();
@@ -553,7 +576,8 @@ export const webBridge: JaneBridge = {
 
     function triggerDownload(url: string, filename?: string) {
       if (typeof window === "undefined") return;
-      const fullUrl = url.startsWith("http") ? url : `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`;
+      const baseOrigin = API_BASE.startsWith("http") ? API_BASE.replace(/\/api\/v1\/?$/, "") : window.location.origin;
+      const fullUrl = url.startsWith("http") ? url : `${baseOrigin}${url.startsWith("/") ? "" : "/"}${url}`;
       try {
         const a = document.createElement("a");
         a.href = fullUrl;

@@ -601,9 +601,16 @@ export default function App() {
           if (!fileName || fileName.toLowerCase() === "download" || fileName.toLowerCase() === "out") {
             fileName = baseNameFromPath(ctx?.source || "") || "Converted media";
           }
-          const downloadUrl = (event.output && event.output.startsWith("/api/"))
+          const rawDl = (event.output && event.output.startsWith("/api/"))
             ? event.output
             : (event.jobId ? `/api/v1/jobs/${event.jobId}/download` : undefined);
+          const downloadUrl = rawDl
+            ? (rawDl.startsWith("http")
+                ? rawDl
+                : (runtime?.mode === "browser"
+                    ? `https://janeconverter-web.onrender.com${rawDl.startsWith("/") ? "" : "/"}${rawDl}`
+                    : rawDl))
+            : undefined;
           setFailure(null);
           const historyId = `${event.jobId}-${Date.now()}`;
           const historyItem: ConversionHistoryItem = {
