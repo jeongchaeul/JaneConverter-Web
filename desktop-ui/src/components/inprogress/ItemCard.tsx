@@ -108,7 +108,7 @@ export function ItemCard({
             <div
               className="h-full rounded-full transition-all duration-200"
               style={{
-                width: `${Math.round(item.progress * 100)}%`,
+                width: `${Math.min(100, Math.max(0, Math.round(item.progress <= 1 ? item.progress * 100 : item.progress)))}%`,
                 backgroundColor: "var(--accent-color, #c52b68)",
               }}
             />
@@ -198,7 +198,7 @@ export function ItemCard({
             <div
               className="h-full rounded-full transition-all duration-200"
               style={{
-                width: `${Math.round(item.progress * 100)}%`,
+                width: `${Math.min(100, Math.max(0, Math.round(item.progress <= 1 ? item.progress * 100 : item.progress)))}%`,
                 backgroundColor: "var(--accent-color, #c52b68)",
               }}
             />

@@ -678,6 +678,10 @@ export default function App() {
           activeJobContextRef.current = null;
           setJobId("");
           setPaused(false);
+          if (event.kind === "cancelled") {
+            setStatus("Ready to convert");
+            setProgress(0);
+          }
         }
       }
     }).then((unlisten) => {
@@ -817,6 +821,10 @@ export default function App() {
   ): Promise<boolean> {
     try {
       const normalizedSource = source.trim();
+      if (!normalizedSource && !selectedCapture?.path) {
+        statusMessage("Please enter a valid media URL or upload a file.");
+        return false;
+      }
       if (normalizedSource) {
         lastSourceRef.current = normalizedSource;
         setLastSourceTitle(normalizedSource);
@@ -1295,6 +1303,26 @@ export default function App() {
                 ? "Wait for the active operation to complete, or click Abort to stop it before starting a new conversion."
                 : /timed out|capture|guest session|no public photos/i.test(failure.message)
                 ? "Verify the post link is publicly viewable, or use Account Access with the Browser Capture extension if the post requires sign-in."
+                : /bot verification|bot-checked|restricted|confirm you're not a bot/i.test(failure.message)
+                ? (
+                    <div>
+                      <p className="font-semibold text-amber-300">YouTube Cloud Datacenter Restriction</p>
+                      <p className="mt-1 text-zinc-300">
+                        YouTube is blocking stream extraction for this track from cloud hosting servers (bot check / sign-in required).
+                        Convert this track with zero restrictions using the <strong>JaneConverter Desktop App</strong> on your PC.
+                      </p>
+                      <div className="mt-3">
+                        <a
+                          href="https://github.com/jeongchaeul/JaneConverter/releases/latest"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-pink-500/40 bg-pink-500/20 px-3 py-1.5 text-xs font-semibold text-pink-300 hover:bg-pink-500/30 transition-colors"
+                        >
+                          Download Desktop App on GitHub
+                        </a>
+                      </div>
+                    </div>
+                  )
                 : failure.suggestLossless
                 ? <>Try <strong className="text-white">Image → Lossless Image</strong> in Converter, then run the conversion again.</>
                 : failure.message.toLowerCase().includes("audio") || (settings.category === "Audio" || settings.category === "Music")

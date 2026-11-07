@@ -145,12 +145,12 @@ export function ConverterQueue({
                     <div className="w-20 h-1.5 overflow-hidden rounded-full bg-white/[0.06] ring-1 ring-white/10">
                       <div
                         className="h-full rounded-full bg-[#c52b68] transition-all duration-200"
-                        style={{ width: `${Math.round(item.progress * 100)}%` }}
+                        style={{ width: `${Math.min(100, Math.max(0, Math.round(item.progress <= 1 ? item.progress * 100 : item.progress)))}%` }}
                       />
                     </div>
                     <span className="flex items-center gap-1 text-[11px] text-amber-300 font-mono font-medium">
                       <LoaderCircle className="size-3 animate-spin" />
-                      {Math.round(item.progress * 100)}%
+                      {Math.min(100, Math.max(0, Math.round(item.progress <= 1 ? item.progress * 100 : item.progress)))}%
                     </span>
                   </div>
                 )}

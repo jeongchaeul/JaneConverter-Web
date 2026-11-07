@@ -656,6 +656,7 @@ export function InProgressView({
   }
 
   const effectiveProgress = progress > 0 ? progress : summary.overallProgress;
+  const normalizedOverallProgress = Math.min(100, Math.max(0, Math.round(effectiveProgress <= 1 ? effectiveProgress * 100 : effectiveProgress)));
   const batchCover = getBatchCover();
   const hasOutputDir = Boolean(summary.outputDir || outputDir);
 
@@ -832,7 +833,7 @@ export function InProgressView({
 
           <div className="text-right">
             <div className="font-mono text-xl font-bold text-white tracking-tight">
-              {Math.round(effectiveProgress * 100)}%
+              {normalizedOverallProgress}%
             </div>
             <div className="text-[10px] uppercase tracking-wider text-zinc-500">Overall Progress</div>
           </div>
@@ -843,7 +844,7 @@ export function InProgressView({
           <div
             className="h-full rounded-full transition-all duration-300"
             style={{
-              width: `${Math.round(effectiveProgress * 100)}%`,
+              width: `${normalizedOverallProgress}%`,
               backgroundColor: "var(--accent-color, #c52b68)",
               boxShadow: "0 0 16px var(--accent-glow, rgba(197,43,104,.6))",
             }}
