@@ -5,7 +5,7 @@ import unicodedata
 
 VERSION_WORDS = {"live", "remix", "cover", "instrumental", "karaoke", "slowed", "sped", "acoustic", "remaster", "remastered", "demo", "extended", "edit"}
 NOISE_WORDS = {
-    "official", "audio", "video", "music", "lyrics", "lyric", "hd", "hq", "visualizer",
+    "official", "audio", "video", "visual", "audiovisual", "visualizer", "music", "lyrics", "lyric", "hd", "hq",
     "topic", "provided", "youtube", "feat", "ft", "featuring",
     "mv", "m/v", "clip", "full", "stream", "track", "prod", "produced", "ost", "soundtrack", "color", "coded"
 }
@@ -32,7 +32,9 @@ def match_score(requested, candidate, relaxed: bool = False):
         return None
     if (title & VERSION_WORDS) != (actual & VERSION_WORDS):
         return None
-    wanted_title = title - NOISE_WORDS
+    wanted_title = (title - NOISE_WORDS) - artist
+    if not wanted_title:
+        wanted_title = title - NOISE_WORDS
     if not wanted_title or not wanted_title <= actual:
         return None
     primary_artist_str = re.split(r'[,&]|\bfeat\b|\bft\b', str(requested.get("artist") or ""), flags=re.IGNORECASE)[0].strip()

@@ -50,6 +50,16 @@ def build_search_candidates(artist: str, title: str) -> list:
     clean_base_tit = re.sub(r'\s*-\s*(?:remaster|remastered|bonus track|single version|radio edit|edit).*$', '', clean_base_tit, flags=re.IGNORECASE).strip()
     clean_base_tit = clean(clean_base_tit)
 
+    # Strip leading artist prefix if embedded in title (e.g. "2hollis - Warhorse" -> "Warhorse")
+    if prim_art:
+        art_pat = re.compile(rf'^\s*{re.escape(prim_art)}\s*[-–—:]\s*', re.IGNORECASE)
+        clean_base_tit = art_pat.sub('', clean_base_tit).strip()
+        c_tit = art_pat.sub('', c_tit).strip()
+    elif c_art:
+        art_pat = re.compile(rf'^\s*{re.escape(c_art)}\s*[-–—:]\s*', re.IGNORECASE)
+        clean_base_tit = art_pat.sub('', clean_base_tit).strip()
+        c_tit = art_pat.sub('', c_tit).strip()
+
     candidates = []
     # 1. Primary artist + clean base title (highest hit rate, fastest resolution)
     if prim_art and clean_base_tit:

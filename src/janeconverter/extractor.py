@@ -1295,6 +1295,10 @@ def fetch_media_stream(
                                     force=True,
                                 )
                                 recovery_candidates = build_search_candidates(gated_artist, gated_title)
+                                # Prioritize SoundCloud over YouTube when YouTube has bot-blocked the server IP
+                                sc_cands = [c for c in recovery_candidates if c.startswith("scsearch")]
+                                other_cands = [c for c in recovery_candidates if not c.startswith("scsearch")]
+                                recovery_candidates = sc_cands + other_cands
                                 catalog_meta = {
                                     "title": gated_title,
                                     "artist": gated_artist,
@@ -1500,7 +1504,10 @@ def fetch_media_stream(
                 raise RuntimeError(f"Stream extraction failed: {str(e)} (Direct extractor: {direct_err})") from e
         if auth_browser and isinstance(e, BrowserSessionError):
             raise RuntimeError(describe_authenticated_extraction_failure(auth_browser, e)) from e
-        raise RuntimeError(f"Stream extraction failed: {str(e)}") from e
+        err_msg = str(e).strip()
+        if err_msg.startswith("Stream extraction failed: "):
+            raise RuntimeError(err_msg) from e
+        raise RuntimeError(f"Stream extraction failed: {err_msg}") from e
 
 def fetch_playlist_entries(
     url: str,
