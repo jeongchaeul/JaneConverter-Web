@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Inbox,
   Info,
+  Laptop,
   Layers,
   Link2,
   ListMusic,
@@ -1140,13 +1141,14 @@ export function ConverterView({
         </button>
         <button
           type="button"
-          aria-pressed={converterTab === "flp"}
-          onClick={() => setConverterTab("flp")}
-          className={"inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors " + (converterTab === "flp" ? "bg-white/[0.09] text-white" : "text-zinc-500 hover:text-zinc-300")}
+          aria-pressed={false}
+          title="Studio DAW Tools (FL Studio downgrader & DAW utilities) are exclusive to the JaneConverter Desktop application."
+          onClick={() => onStatus("Studio DAW Tools are exclusive to the JaneConverter Desktop application.")}
+          className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium opacity-40 cursor-not-allowed bg-black/60 border border-white/[0.04] text-zinc-500 hover:text-zinc-500"
         >
           <span>Studio DAW Tools</span>
-          <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border border-pink-500/30 bg-pink-500/10 text-pink-300">
-            Producer Suite
+          <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border border-white/10 bg-white/[0.02] text-zinc-600">
+            Desktop Only
           </span>
         </button>
       </div>
@@ -1330,21 +1332,21 @@ export function ConverterView({
           <div className="mt-3 grid gap-3 rounded-xl border border-white/[0.06] bg-black/15 p-4 text-[11px] leading-relaxed text-zinc-500 md:grid-cols-3">
             <div>
               <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-300">
-                <Music2 className="size-3.5 text-pink-400" /> Apple Music (Adaptive Fallback)
+                <Music2 className="size-3.5 text-pink-400" /> Apple Music &amp; Spotify Matching
               </div>
-              Direct audio extraction requires an active Apple Music subscription in your browser session. If you are not signed in, the initial direct stream fetch is expected to fail—JaneConverter automatically falls back to parse playlist metadata and match lossless audio across other public platforms.
+              Tracklists are resolved into canonical artist and title metadata, and JaneConverter matches audio against public high-fidelity masters with strict duration filtering.
             </div>
             <div>
               <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-300">
-                <ShieldCheck className="size-3.5 text-emerald-400" /> Spotify & Private Media
+                <ShieldCheck className="size-3.5 text-emerald-400" /> Public Media &amp; File Uploads
               </div>
-              Spotify tracklists are parsed into metadata; JaneConverter finds matching public streams automatically. For friends-only or login-gated posts (Facebook, Instagram, YouTube), JaneConverter reads your default browser's active session. Opening the link once in your browser freshens tokens.
+              Web Lite converts public URLs (YouTube, SoundCloud, TikTok, Reddit, Instagram reels/posts, Pinterest) and user-uploaded local media up to 500 MiB with zero cookies or tracking.
             </div>
             <div>
-              <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-300">
-                <Inbox className="size-3.5 text-sky-400" /> Media Capturer Extension
+              <div className="mb-1 flex items-center gap-1.5 font-medium text-amber-300">
+                <Laptop className="size-3.5 text-amber-400" /> Desktop Application Exclusive
               </div>
-              For streams locked behind DRM or players without direct audio/video URLs, use the JaneConverter Browser Bridge in the Media Capturer tab to record playback streams directly into your local library.
+              Media Capturer (authenticated live stream recording), direct browser cookie reading for private/age-gated media, 4K/8K GPU transcode, and FL Studio DAW tools are exclusive to the JaneConverter Desktop application.
             </div>
           </div>
         )}

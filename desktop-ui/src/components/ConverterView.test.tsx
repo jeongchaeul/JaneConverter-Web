@@ -1,1149 +1,1149 @@
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ConverterView, groupIndexesByPreset } from "./ConverterView";
-import type { AccessStatus, ConverterSettings, FetchedMedia } from "../bridge";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-const bridge = vi.hoisted(() => ({
-  chooseFile: vi.fn(),
-  chooseFiles: vi.fn(),
-  chooseFolder: vi.fn(),
-  openPath: vi.fn(),
-  openUrl: vi.fn(),
-  isConvertedLibraryPath: vi.fn().mockResolvedValue(false),
-  captureFacebookAlbum: vi.fn(),
-  cancelFacebookAlbum: vi.fn(),
-  captureSocialPostPhotos: vi.fn(),
-  cancelSocialPostPhotos: vi.fn(),
-  loadPlaylist: vi.fn(),
-  cancelPlaylist: vi.fn(),
-}));
-
-vi.mock("../bridge", () => ({ bridge }));
-
-const settings = {
-  outputDir: "converted",
-  fetchedDir: "fetched",
-  category: "Music" as const,
-  format: "mp3",
-  bitrate: "320k",
-  sampleRate: 48000,
-  resolution: "original",
-  normalize: false,
-  useGpu: false,
-  saveCover: true,
-  saveMetadata: true,
-  retries: 2,
-};
-
-function renderView(
-  onCreateAccess = vi.fn().mockResolvedValue({ active: true, link: "http://127.0.0.1:4321/access/test", browser: "", bridgeConnected: false }),
-  access: AccessStatus = { active: false, link: "", browser: "", bridgeConnected: false },
-  onStart = vi.fn().mockResolvedValue(undefined),
-  selectedCapture: FetchedMedia | null = null,
-  onSettings = vi.fn(),
-  settingsOverride: Partial<ConverterSettings> = {},
-) {
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  const onStatus = vi.fn();
-  const onError = vi.fn();
-
-  act(() => {
-    root.render(
-      <ConverterView
-        settings={{ ...settings, ...settingsOverride }}
-        runtime={null}
-        events={[]}
-        access={access}
-        selectedCapture={selectedCapture}
-        running={false}
-        progress={0}
-        status="Ready"
-        onSettings={onSettings}
-        onStart={onStart}
-        onCancel={vi.fn().mockResolvedValue(undefined)}
-        onCreateAccess={onCreateAccess}
-        onClearAccess={vi.fn().mockResolvedValue(undefined)}
-        onStatus={onStatus}
-        onError={onError}
-      />,
-    );
-  });
-
-  const updateProps = (newProps: Partial<Parameters<typeof ConverterView>[0]>) => {
-    act(() => {
-      root.render(
-        <ConverterView
-          settings={{ ...settings, ...settingsOverride }}
-          runtime={null}
-          events={[]}
-          access={access}
-          selectedCapture={selectedCapture}
-          running={false}
-          progress={0}
-          status="Ready"
-          onSettings={onSettings}
-          onStart={onStart}
-          onCancel={vi.fn().mockResolvedValue(undefined)}
-          onCreateAccess={onCreateAccess}
-          onClearAccess={vi.fn().mockResolvedValue(undefined)}
-          onStatus={onStatus}
-          onError={onError}
-          {...newProps}
-        />,
-      );
-    });
-  };
-
-  return { container, root, updateProps, onCreateAccess, onStatus, onSettings, onError };
-}
-
-describe("Converter account access feedback", () => {
-  beforeEach(() => {
-    window.scrollTo = vi.fn();
-    bridge.openUrl.mockReset();
-    bridge.openUrl.mockResolvedValue(undefined);
-    bridge.openPath.mockReset();
-    bridge.openPath.mockResolvedValue(undefined);
-    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true; });
-    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) { this.open = false; });
-  });
-
-  it("offers Open in browser button when source URL is provided", async () => {
-    const view = renderView();
-    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://music.apple.com/us/album/test/123");
-      input?.dispatchEvent(new Event("input", { bubbles: true }));
-      input?.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-
-    const openBtn = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Open in browser"));
-    expect(openBtn).toBeDefined();
-
-    await act(async () => { openBtn?.click(); });
-    expect(bridge.openUrl).toHaveBeenCalledWith("https://music.apple.com/us/album/test/123");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("cancels a pending playlist load and closes the loading overlay", async () => {
-    let rejectLoad: (reason: Error) => void = () => {};
-    bridge.loadPlaylist.mockImplementationOnce(() => new Promise((_, reject) => { rejectLoad = reject; }));
-    bridge.cancelPlaylist.mockImplementationOnce(async () => { rejectLoad(new Error("Playlist loading cancelled.")); });
-    const view = renderView();
-    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://example.test/playlist");
-      input?.dispatchEvent(new Event("input", { bubbles: true }));
-      input?.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    await act(async () => {
-      Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Playlist tracks"))?.click();
-    });
-    expect(bridge.loadPlaylist).toHaveBeenCalledWith("https://example.test/playlist");
-    const cancel = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Cancel");
-    expect(cancel).toBeDefined();
-    await act(async () => { cancel?.click(); });
-    expect(bridge.cancelPlaylist).toHaveBeenCalledTimes(1);
-    expect(view.onStatus).toHaveBeenCalledWith("Playlist loading cancelled.");
-    expect(view.container.textContent).not.toContain("Loading playlist");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("shows Story items button and loads story catalog when an ephemeral story URL is entered", async () => {
-    bridge.loadPlaylist.mockResolvedValueOnce({
-      title: "Story by shinchewieeee",
-      items: [
-        { index: 1, title: "Story 1", artist: "shinchewieeee", duration: "0:15", url: "https://example.test/s1" },
-      ],
-    });
-    const view = renderView(undefined, undefined, undefined, null, undefined, { allowStoryExtraction: true });
-    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://www.instagram.com/stories/shinchewieeee/");
-      input?.dispatchEvent(new Event("input", { bubbles: true }));
-      input?.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    const storyButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Story items"));
-    expect(storyButton).toBeDefined();
-
-    await act(async () => {
-      storyButton?.click();
-    });
-    expect(bridge.loadPlaylist).toHaveBeenCalledWith("https://www.instagram.com/stories/shinchewieeee/");
-    expect(view.onStatus).toHaveBeenCalledWith("Loaded 1 items from Story by shinchewieeee.");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("offers a preserve-quality intent preset that selects source format", async () => {
-    const view = renderView();
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Preserve Quality");
-
-    expect(button).toBeDefined();
-    await act(async () => { button?.click(); await Promise.resolve(); });
-
-    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({
-      format: "source",
-      resolution: "original",
-      normalize: false,
-      useGpu: false,
-    }));
-    expect(view.onStatus).toHaveBeenCalledWith(expect.stringContaining("Applied Preserve Quality preset"));
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("offers image source PNG recovery only as an explicit advanced choice", async () => {
-    const view = renderView(undefined, undefined, undefined, null, undefined, { category: "Image", format: "source" });
-    expect(view.container.textContent).not.toContain("Allow PNG recovery");
-    const advanced = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Advanced settings"));
-    await act(async () => { advanced?.click(); await Promise.resolve(); });
-    const recovery = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Allow PNG recovery"));
-    expect(recovery?.textContent).toContain("show the format change");
-    await act(async () => { recovery?.querySelector("input")?.click(); await Promise.resolve(); });
-    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({ allowPngFallback: true }));
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("toggles archival vault fallback under advanced settings", async () => {
-    const view = renderView();
-    const advanced = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Advanced settings"));
-    await act(async () => { advanced?.click(); await Promise.resolve(); });
-    const archival = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Search archival vaults"));
-    expect(archival?.textContent).toContain("Wayback Machine");
-    await act(async () => { archival?.querySelector("input")?.click(); await Promise.resolve(); });
-    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({ archivalFallback: true }));
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("unselects a preset and restores the prior manual settings", async () => {
-    const view = renderView();
-    const presetButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Studio Master");
-
-    expect(presetButton).toBeDefined();
-    expect(view.container.textContent).not.toContain("No preset");
-    await act(async () => { presetButton?.click(); await Promise.resolve(); });
-    expect(presetButton?.getAttribute("aria-pressed")).toBe("true");
-    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "wav" }));
-
-    await act(async () => { presetButton?.click(); await Promise.resolve(); });
-    expect(presetButton?.getAttribute("aria-pressed")).toBe("false");
-    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "mp3", bitrate: "320k", category: "Music" }));
-    expect(view.onStatus).toHaveBeenCalledWith(expect.stringContaining("previous conversion settings were restored"));
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("leaves archival fallback disabled by default on presets, while allowing manual enable", async () => {
-    const view = renderView();
-    const presetButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Studio Master");
-    expect(presetButton).toBeDefined();
-
-    // 1. Selecting preset keeps archivalFallback false by default
-    await act(async () => { presetButton?.click(); await Promise.resolve(); });
-    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "wav", archivalFallback: false }));
-
-    // 2. User can expand Advanced settings and disable archival fallback
-    const advanced = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Advanced settings"));
-    await act(async () => { advanced?.click(); await Promise.resolve(); });
-    const archival = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Search archival vaults"));
-    expect(archival).toBeDefined();
-    // Re-render with archivalFallback true to test toggle off
-    await act(async () => {
-      view.root.render(
-        <ConverterView
-          settings={{ ...settings, archivalFallback: true }}
-          runtime={null}
-          events={[]}
-          access={{ active: false, link: "", browser: "", bridgeConnected: false }}
-          selectedCapture={null}
-          running={false}
-          progress={0}
-          status="Ready"
-          onSettings={view.onSettings}
-          onStart={vi.fn()}
-          onCancel={vi.fn()}
-          onCreateAccess={vi.fn()}
-          onClearAccess={vi.fn()}
-          onStatus={view.onStatus}
-          onError={view.onError}
-        />
-      );
-    });
-    const archivalChecked = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Search archival vaults"));
-    await act(async () => { archivalChecked?.querySelector("input")?.click(); await Promise.resolve(); });
-    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ archivalFallback: false }));
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("restores video settings and keeps relevant advanced controls available", async () => {
-    const view = renderView(undefined, undefined, undefined, null, vi.fn(), { category: "Video", format: "mkv", bitrate: "best" });
-    const presetButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Universal Video");
-
-    await act(async () => { presetButton?.click(); await Promise.resolve(); });
-    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "mp4", resolution: "1080p" }));
-    await act(async () => { presetButton?.click(); await Promise.resolve(); });
-    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "mkv", resolution: "original", useGpu: false }));
-
-    const advancedSwitch = view.container.querySelector<HTMLButtonElement>('button[role="switch"]');
-    await act(async () => { advancedSwitch?.click(); await Promise.resolve(); });
-    expect(advancedSwitch?.getAttribute("aria-checked")).toBe("true");
-    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Video quality"]')?.disabled).toBe(false);
-    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Video resolution"]')?.disabled).toBe(false);
-    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Audio bitrate"]')?.disabled).toBe(false);
-    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Audio sample rate"]')).toBeNull();
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("exposes playlist download strategy outside advanced settings and switches modes", async () => {
-    const onSettings = vi.fn();
-    const view = renderView(undefined, undefined, undefined, null, onSettings);
-
-    const concurrentBtn = Array.from(view.container.querySelectorAll("button")).find((item) =>
-      item.textContent?.includes("Concurrent (Parallel)"),
-    );
-    expect(concurrentBtn).toBeDefined();
-
-    await act(async () => {
-      concurrentBtn?.click();
-      await Promise.resolve();
-    });
-    expect(onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ playlistMode: "concurrent", concurrency: 4 }));
-
-    const linearBtn = Array.from(view.container.querySelectorAll("button")).find((item) =>
-      item.textContent?.includes("Linear (Sequential)"),
-    );
-    expect(linearBtn).toBeDefined();
-
-    await act(async () => {
-      linearBtn?.click();
-      await Promise.resolve();
-    });
-    expect(onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ playlistMode: "linear", concurrency: 1 }));
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("displays revised source notes for Apple Music adaptive fallback, Spotify, and browser session", async () => {
-    const view = renderView();
-    const notesBtn = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Source notes and fallback engine"));
-    expect(notesBtn).toBeDefined();
-
-    await act(async () => { notesBtn?.click(); });
-    expect(view.container.textContent).toContain("Apple Music (Adaptive Fallback)");
-    expect(view.container.textContent).toContain("Spotify & Private Media");
-    expect(view.container.textContent).toContain("Media Capturer Extension");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("auto-opens online source in browser when openInBrowser setting is enabled", async () => {
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    const view = renderView(undefined, undefined, onStart, null, undefined, { openInBrowser: true });
-    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://www.facebook.com/reel/12345");
-      input?.dispatchEvent(new Event("input", { bubbles: true }));
-      input?.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-
-    const convertBtn = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Convert media"));
-    await act(async () => { convertBtn?.click(); });
-
-    expect(bridge.openUrl).toHaveBeenCalledWith("https://www.facebook.com/reel/12345");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("starts conversion from browser capture without requiring a source URL", async () => {
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    const view = renderView(
-      undefined,
-      { active: true, link: "http://127.0.0.1:4321/access/test", browser: "Vivaldi", bridgeConnected: true },
-      onStart,
-    );
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Convert media"));
-
-    await act(async () => {
-      button?.click();
-      await Promise.resolve();
-    });
-
-    expect(onStart).toHaveBeenCalledWith("", undefined);
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("captures a public Facebook album before starting its local download", async () => {
-    const source = "https://www.facebook.com/share/p/1EpX6FjAuC/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureFacebookAlbum.mockReset();
-    bridge.captureFacebookAlbum.mockResolvedValue({
-      captureId: "12345678-1234-1234-1234-123456789abc",
-      title: "Public album",
-      photoCount: 9,
-      mediaKind: "photo",
-    });
-    const view = renderView(undefined, undefined, onStart);
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-
-    await act(async () => {
-      button?.click();
-      await Promise.resolve();
-    });
-
-    expect(bridge.captureFacebookAlbum).toHaveBeenCalledWith(source, expect.any(String));
-    expect(onStart).toHaveBeenCalledWith(source, undefined, "12345678-1234-1234-1234-123456789abc");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("releases the Facebook guest session if conversion cannot start", async () => {
-    const source = "https://www.facebook.com/share/p/1EpX6FjAuC/";
-    const onStart = vi.fn().mockResolvedValue(false);
-    bridge.captureFacebookAlbum.mockReset();
-    bridge.captureFacebookAlbum.mockResolvedValue({
-      captureId: "12345678-1234-1234-1234-123456789abc",
-      title: "Public album",
-      photoCount: 2,
-      mediaKind: "photo",
-    });
-    bridge.cancelFacebookAlbum.mockReset().mockResolvedValue(undefined);
-    const view = renderView(undefined, undefined, onStart);
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => {
-      button?.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(onStart).toHaveBeenCalledWith(source, undefined, "12345678-1234-1234-1234-123456789abc");
-    expect(bridge.cancelFacebookAlbum).toHaveBeenCalledWith(expect.any(String));
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("routes a Facebook video-only post through the existing video extractor", async () => {
-    const source = "https://www.facebook.com/share/p/video-post/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureFacebookAlbum.mockReset();
-    bridge.captureFacebookAlbum.mockResolvedValue({
-      captureId: "12345678-1234-1234-1234-123456789abc",
-      title: "Public video",
-      photoCount: 0,
-      mediaKind: "video",
-    });
-    const view = renderView(undefined, undefined, onStart);
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); });
-    expect(bridge.captureFacebookAlbum).toHaveBeenCalledWith(source, expect.any(String));
-    expect(onStart).toHaveBeenCalledWith(source, undefined, undefined, undefined, "video");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("falls back to onStart when Facebook guest capture redirects to sign-in", async () => {
-    const source = "https://www.facebook.com/share/p/1EZzZ7RdBe/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureFacebookAlbum.mockReset();
-    bridge.captureFacebookAlbum.mockRejectedValue(
-      new Error("Facebook redirected the post or photo viewer to a sign-in page before JaneConverter could reach its public photos.")
-    );
-    const view = renderView(undefined, undefined, onStart);
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); await Promise.resolve(); });
-    expect(bridge.captureFacebookAlbum).toHaveBeenCalledWith(source, expect.any(String));
-    expect(onStart).toHaveBeenCalledWith(source, undefined);
-    expect(view.onError).not.toHaveBeenCalled();
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("inspects an Instagram /p/ post and routes to video conversion when video is detected", async () => {
-    const source = "https://www.instagram.com/p/DdwWRyTRMut/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureSocialPostPhotos.mockReset();
-    bridge.captureSocialPostPhotos.mockResolvedValue({
-      captureId: "12345678-1234-1234-1234-123456789abc",
-      title: "Instagram video post",
-      photoCount: 0,
-      mediaKind: "video",
-    });
-    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
-      category: "Video",
-      format: "mp4",
-      bitrate: "balanced",
-      resolution: "1080p",
-    });
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); });
-    expect(bridge.captureSocialPostPhotos).toHaveBeenCalledWith(source, expect.any(String));
-    expect(onStart).toHaveBeenCalledWith(source, undefined, undefined, undefined, "video");
-    expect(view.onStatus).toHaveBeenCalledWith("This Instagram post contains video. Starting the video conversion...");
-    expect(button?.textContent?.trim()).toBe("Convert media");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("captures photos from a username-prefixed Instagram /p/ post even when Preserve Quality (Video/source) is active", async () => {
-    const source = "https://www.instagram.com/justinaxiecl/p/DFMyvpiSgxW/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureSocialPostPhotos.mockReset();
-    bridge.captureSocialPostPhotos.mockResolvedValue({
-      captureId: "12345678-1234-1234-1234-123456789abc",
-      title: "Carousel post",
-      photoCount: 5,
-      mediaKind: "photo",
-    });
-    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
-      category: "Video",
-      format: "source",
-      bitrate: "best",
-      resolution: "original",
-    });
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); });
-    expect(bridge.captureSocialPostPhotos).toHaveBeenCalledWith(source, expect.any(String));
-    expect(onStart).toHaveBeenCalledWith(source, undefined, undefined, "12345678-1234-1234-1234-123456789abc");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("bypasses slow guest capture and directly starts conversion when readBrowserCookies is enabled for Instagram", async () => {
-    const source = "https://www.instagram.com/p/DeRahM1CQLf/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureSocialPostPhotos.mockReset();
-    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
-      readBrowserCookies: true,
-    });
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); });
-    expect(bridge.captureSocialPostPhotos).not.toHaveBeenCalled();
-    expect(onStart).toHaveBeenCalledWith(source, undefined);
-    expect(view.onStatus).toHaveBeenCalledWith("Reading Instagram post using your active browser session...");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("bypasses slow guest capture and directly starts conversion when readBrowserCookies is enabled for Facebook", async () => {
-    const source = "https://www.facebook.com/share/p/1EpX6FjAuC/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureFacebookAlbum.mockReset();
-    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
-      readBrowserCookies: true,
-    });
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); });
-    expect(bridge.captureFacebookAlbum).not.toHaveBeenCalled();
-    expect(onStart).toHaveBeenCalledWith(source, undefined);
-    expect(view.onStatus).toHaveBeenCalledWith("Reading Facebook post using your active browser session...");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("sends a Facebook post to video conversion when the video preset is selected", async () => {
-    const source = "https://www.facebook.com/share/p/1EfkMDVBB1/";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureFacebookAlbum.mockReset();
-    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
-      category: "Video",
-      format: "mp4",
-      bitrate: "balanced",
-      resolution: "1080p",
-    });
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); });
-    expect(onStart).toHaveBeenCalledWith(source, undefined);
-    expect(bridge.captureFacebookAlbum).not.toHaveBeenCalled();
-    expect(view.onStatus).toHaveBeenCalledWith("Sending this Facebook post to the video converter...");
-    expect(button?.textContent?.trim()).toBe("Convert media");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("sends an X/Twitter post to video conversion when the video preset is selected", async () => {
-    const source = "https://x.com/Naskomusic/status/2110194682684956686?s=20";
-    const onStart = vi.fn().mockResolvedValue(undefined);
-    bridge.captureSocialPostPhotos.mockReset();
-    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
-      category: "Video",
-      format: "mp4",
-      bitrate: "balanced",
-      resolution: "1080p",
-    });
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, source);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
-    await act(async () => { button?.click(); await Promise.resolve(); });
-    expect(onStart).toHaveBeenCalledWith(source, undefined);
-    expect(bridge.captureSocialPostPhotos).not.toHaveBeenCalled();
-    expect(view.onStatus).toHaveBeenCalledWith("Sending this X/Twitter post to the video converter...");
-    expect(button?.textContent?.trim()).toBe("Convert media");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("does not lock output controls to an unselected browser capture", async () => {
-    const view = renderView(undefined, {
-      active: true,
-      link: "http://127.0.0.1:4321/access/test",
-      browser: "Vivaldi",
-      bridgeConnected: true,
-      capturedMediaKind: "video",
-    });
-
-    await act(async () => { await Promise.resolve(); });
-
-    expect(view.onSettings).not.toHaveBeenCalled();
-    const imageButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent === "Image");
-    expect(imageButton).toBeDefined();
-    await act(async () => { imageButton?.click(); });
-    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({ category: "Image" }));
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-  it("switches to image output when the browser capture is an image", async () => {
-    const view = renderView(
-      undefined,
-      {
-        active: true,
-        link: "http://127.0.0.1:4321/access/test",
-        browser: "Vivaldi",
-        bridgeConnected: true,
-        capturedMediaKind: "image",
-      },
-      undefined,
-      { path: "fetched/image.jpg", name: "image.jpg", mediaKind: "image", mimeType: "image/jpeg", captureMode: "network", title: "image", size: 1000 },
-    );
-
-    await act(async () => { await Promise.resolve(); });
-
-    expect(view.container.textContent).toContain("Image");
-    expect((view.container.querySelector('select[aria-label="Container format"]') as HTMLSelectElement | null)?.value).toBe("jpg");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("handles dropped web links and files into the converter", async () => {
-    const view = renderView();
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    expect(input).not.toBeNull();
-
-    // Test dropping a web URL
-    await act(async () => {
-      const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
-      Object.defineProperty(dropEvent, "dataTransfer", {
-        value: {
-          files: [],
-          getData: (format: string) => (format === "text/uri-list" ? "https://youtube.com/watch?v=12345" : ""),
-        },
-      });
-      input.dispatchEvent(dropEvent);
-      await Promise.resolve();
-    });
-
-    expect(input.value).toBe("https://youtube.com/watch?v=12345");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("queues an item, displays it in the Conversion Queue, and allows removing it", async () => {
-    const view = renderView();
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, "https://youtube.com/watch?v=leroy123");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    const queueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Queue");
-    expect(queueButton).toBeDefined();
-
-    await act(async () => {
-      queueButton?.click();
-    });
-
-    expect(view.container.textContent).toContain("Conversion Queue");
-    expect(view.container.textContent).toContain("https://youtube.com/watch?v=leroy123");
-
-    const removeButton = view.container.querySelector('button[title="Remove from queue"]') as HTMLButtonElement;
-    expect(removeButton).not.toBeNull();
-
-    await act(async () => {
-      removeButton.click();
-    });
-
-    expect(view.container.textContent).not.toContain("Conversion Queue");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("starts the queued items sequentially when start queue is clicked without cascading concurrent jobs", async () => {
-    const onStart = vi.fn().mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(true), 50)));
-    const view = renderView(undefined, undefined, onStart);
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-
-    const queueUrl = async (url: string) => {
-      await act(async () => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, url);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      const queueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Queue");
-      await act(async () => {
-        queueButton?.click();
-      });
-    };
-
-    await queueUrl("https://youtube.com/watch?v=item1");
-    await queueUrl("https://youtube.com/watch?v=item2");
-    await queueUrl("https://youtube.com/watch?v=item3");
-
-    const startQueueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.includes("Start queue"));
-    expect(startQueueButton).toBeDefined();
-
-    await act(async () => {
-      startQueueButton?.click();
-    });
-
-    // Crucial check: only the FIRST item is started; item2 and item3 are strictly locked out
-    expect(onStart).toHaveBeenCalledTimes(1);
-    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=item1", undefined);
-    expect(onStart).not.toHaveBeenCalledWith("https://youtube.com/watch?v=item2", undefined);
-    expect(onStart).not.toHaveBeenCalledWith("https://youtube.com/watch?v=item3", undefined);
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("advances automatically to item #2 when item #1 completes", async () => {
-    const onStart = vi.fn().mockResolvedValue(true);
-    const view = renderView(undefined, undefined, onStart);
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-
-    const queueUrl = async (url: string) => {
-      await act(async () => {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, url);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      const queueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Queue");
-      await act(async () => {
-        queueButton?.click();
-      });
-    };
-
-    await queueUrl("https://youtube.com/watch?v=item1");
-    await queueUrl("https://youtube.com/watch?v=item2");
-
-    const startQueueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.includes("Start queue"));
-    await act(async () => {
-      startQueueButton?.click();
-    });
-
-    expect(onStart).toHaveBeenCalledTimes(1);
-    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=item1", undefined);
-
-    // Simulate item #1 completing
-    await act(async () => {
-      view.updateProps({
-        events: [{ jobId: "item1", kind: "finished", message: "Conversion complete: item1.mp3" }],
-        running: false,
-      });
-    });
-
-    // Item #2 must have been started automatically!
-    expect(onStart).toHaveBeenCalledTimes(2);
-    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=item2", undefined);
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("queues an item when clicking Convert media while an operation is already active and starts it when current conversion completes", async () => {
-    const onStart = vi.fn().mockResolvedValue(true);
-    const view = renderView(undefined, undefined, onStart);
-    await act(async () => {
-      view.updateProps({ running: true });
-    });
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, "https://youtube.com/watch?v=queuedItem");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    const convertBtn = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Convert media");
-    expect(convertBtn).toBeDefined();
-    expect(convertBtn?.disabled).toBe(false);
-
-    // Clicking Convert media while running should queue it instead of calling onStart directly
-    await act(async () => {
-      convertBtn?.click();
-    });
-
-    expect(view.container.textContent).toContain("Conversion Queue");
-    expect(onStart).not.toHaveBeenCalled();
-
-    // Now simulate the active conversion finishing (running becomes false)
-    await act(async () => {
-      view.updateProps({
-        events: [{ jobId: "standalone-job", kind: "finished", message: "Conversion complete: initial.mp3" }],
-        running: false,
-      });
-    });
-
-    // The queued item must now automatically start converting!
-    expect(onStart).toHaveBeenCalledTimes(1);
-    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=queuedItem", undefined);
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("allows toggling harmonic exciter in advanced settings and displays explanation", async () => {
-    const onSettings = vi.fn();
-    const view = renderView(undefined, undefined, undefined, null, onSettings, {
-      category: "Music",
-      format: "mp3",
-      reconstructFrequencyLoss: false,
-    });
-    const advancedSwitch = view.container.querySelector<HTMLButtonElement>('button[role="switch"]');
-    await act(async () => { advancedSwitch?.click(); await Promise.resolve(); });
-
-    const checkboxes = Array.from(view.container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
-    const reconCheckbox = checkboxes.find((c) => c.closest("label")?.textContent?.includes("Harmonic Exciter"));
-    expect(reconCheckbox).toBeDefined();
-    expect(reconCheckbox?.checked).toBe(false);
-
-    await act(async () => {
-      reconCheckbox?.click();
-      await Promise.resolve();
-    });
-    expect(onSettings).toHaveBeenCalledWith(expect.objectContaining({ reconstructFrequencyLoss: true }));
-
-    await act(async () => {
-      view.updateProps({
-        settings: {
-          outputDir: "converted",
-          fetchedDir: "fetched",
-          category: "Music",
-          format: "mp3",
-          bitrate: "320k",
-          sampleRate: 48000,
-          resolution: "original",
-          normalize: false,
-          useGpu: false,
-          saveCover: true,
-          saveMetadata: true,
-          reconstructFrequencyLoss: true,
-          retries: 2,
-        },
-      });
-    });
-    expect(view.container.textContent).toContain("Harmonic Exciter (High-Frequency Sparkle / Studio Air)");
-    expect(view.container.textContent).toContain("What it does:");
-    expect(view.container.textContent).toContain("What to expect:");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("handles dropped converted-library file with a single status response and deduplicates rapid drops", async () => {
-    (bridge.isConvertedLibraryPath as unknown as { mockResolvedValue: (v: boolean) => void }).mockResolvedValue(true);
-    const view = renderView();
-
-    const dropSection = view.container.querySelector("section");
-    expect(dropSection).not.toBeNull();
-
-    const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperty(dropEvent, "dataTransfer", {
-      value: {
-        files: [{ path: "I:/Files 1/JaneConverter Export Library 1/converted/song.mp3", name: "song.mp3" }],
-        getData: vi.fn().mockReturnValue(""),
-      },
-    });
-
-    // Fire first drop
-    await act(async () => {
-      dropSection?.dispatchEvent(dropEvent);
-      await Promise.resolve();
-    });
-
-    // Fire duplicate rapid drop (e.g. DOM event + Tauri event collision)
-    await act(async () => {
-      dropSection?.dispatchEvent(dropEvent);
-      await Promise.resolve();
-    });
-
-    expect(view.onStatus).toHaveBeenCalledTimes(1);
-    expect(view.onStatus).toHaveBeenCalledWith(
-      "Converted-library files can be dragged out to other apps, but can't be dropped back into JaneConverter."
-    );
-
-    (bridge.isConvertedLibraryPath as unknown as { mockResolvedValue: (v: boolean) => void }).mockResolvedValue(false);
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("does not re-open file dialog when user closes or cancels file browse", async () => {
-    (bridge.chooseFiles as unknown as { mockResolvedValue: (v: string[]) => void }).mockResolvedValue([]);
-    const view = renderView();
-
-    const browseBtn = Array.from(view.container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Browse")
-    );
-    expect(browseBtn).toBeDefined();
-
-    await act(async () => {
-      browseBtn?.click();
-      await Promise.resolve();
-    });
-
-    expect(bridge.chooseFiles).toHaveBeenCalledTimes(1);
-    expect(bridge.chooseFile).not.toHaveBeenCalled();
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-it("groupIndexesByPreset groups selected items by their distinct presets", () => {
-    const presetA = {
-      id: "preset-a",
-      name: "Preset A",
-      category: "Video" as const,
-      group: "Video" as const,
-      format: "mp4",
-      bitrate: "balanced",
-      sampleRate: 48000,
-      resolution: "1080p",
-      normalize: false,
-      useGpu: true,
-      description: "A",
-    };
-    const presetB = {
-      id: "preset-b",
-      name: "Preset B",
-      category: "Audio" as const,
-      group: "Music" as const,
-      format: "mp3",
-      bitrate: "320k",
-      sampleRate: 44100,
-      resolution: "original",
-      normalize: true,
-      useGpu: false,
-      description: "B",
-    };
-
-    const single = groupIndexesByPreset("1,2,3", presetA, {});
-    expect(single).toEqual([{ indexes: "1,2,3", preset: presetA }]);
-
-    const split = groupIndexesByPreset("1,2,3", presetA, { 2: presetB });
-    expect(split).toHaveLength(2);
-    expect(split).toEqual(
-      expect.arrayContaining([
-        { indexes: "1,3", preset: presetA },
-        { indexes: "2", preset: presetB },
-      ])
-    );
-  });
-
-  it("renders completion prompt with dismiss close button next to use as source and closes when clicked", async () => {
-    const view = renderView();
-    await act(async () => {
-      view.updateProps({
-        events: [
-          {
-            jobId: "job-1",
-            kind: "finished",
-            message: "Conversion complete: song.mp3",
-            output: "C:/output/song.mp3",
-          },
-        ],
-      });
-    });
-
-    expect(view.container.textContent).toContain("song.mp3");
-    expect(view.container.textContent).toContain("Conversion finished and verified via ffprobe.");
-
-    const useAsSourceBtn = Array.from(view.container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Use as source")
-    );
-    expect(useAsSourceBtn).toBeDefined();
-
-    const closeBtn = view.container.querySelector('button[aria-label="Close completion prompt"]') as HTMLButtonElement | null;
-    expect(closeBtn).not.toBeNull();
-
-    const openFolderBtn = Array.from(view.container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Open folder")
-    );
-    expect(openFolderBtn).toBeDefined();
-
-    await act(async () => {
-      openFolderBtn?.click();
-      await Promise.resolve();
-    });
-
-    expect(bridge.openPath).toHaveBeenCalledWith("C:/output/song.mp3");
-
-    await act(async () => {
-      closeBtn?.click();
-      await Promise.resolve();
-    });
-
-    expect(view.container.textContent).not.toContain("Conversion finished and verified via ffprobe.");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("resolves the exact folder from event history lines when finished event lacks output", async () => {
-    const view = renderView();
-    await act(async () => {
-      view.updateProps({
-        events: [
-          {
-            jobId: "job-album-1",
-            kind: "progress",
-            message: "Export Directory: D:/Music/Skrillex - Quest For Fire (FULL ALBUM 2023)",
-          },
-          {
-            jobId: "job-album-1",
-            kind: "finished",
-            message: "Conversion finished. Your media is ready.",
-          },
-        ],
-      });
-    });
-
-    expect(view.container.textContent).toContain("Skrillex - Quest For Fire (FULL ALBUM 2023)");
-
-    const openFolderBtn = Array.from(view.container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Open folder")
-    );
-    expect(openFolderBtn).toBeDefined();
-
-    await act(async () => {
-      openFolderBtn?.click();
-      await Promise.resolve();
-    });
-
-    expect(bridge.openPath).toHaveBeenCalledWith("D:/Music/Skrillex - Quest For Fire (FULL ALBUM 2023)");
-
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-
-  it("shows an Instagram profile banner and button to redirect to active stories", async () => {
-    const profileUrl = "https://www.instagram.com/mzwerr/";
-    const view = renderView();
-    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, profileUrl);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    expect(view.container.textContent).toContain("Instagram Profile Detected (@mzwerr)");
-    const fetchStoryBtn = Array.from(view.container.querySelectorAll("button")).find(
-      (b) => b.textContent?.includes("Fetch Story (@mzwerr)")
-    );
-    expect(fetchStoryBtn).toBeDefined();
-
-    await act(async () => {
-      fetchStoryBtn?.click();
-      await Promise.resolve();
-    });
-
-    expect(input.value).toBe("https://www.instagram.com/stories/mzwerr/");
-    await act(async () => { view.root.unmount(); });
-    view.container.remove();
-  });
-});
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ConverterView, groupIndexesByPreset } from "./ConverterView";
+import type { AccessStatus, ConverterSettings, FetchedMedia } from "../bridge";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const bridge = vi.hoisted(() => ({
+  chooseFile: vi.fn(),
+  chooseFiles: vi.fn(),
+  chooseFolder: vi.fn(),
+  openPath: vi.fn(),
+  openUrl: vi.fn(),
+  isConvertedLibraryPath: vi.fn().mockResolvedValue(false),
+  captureFacebookAlbum: vi.fn(),
+  cancelFacebookAlbum: vi.fn(),
+  captureSocialPostPhotos: vi.fn(),
+  cancelSocialPostPhotos: vi.fn(),
+  loadPlaylist: vi.fn(),
+  cancelPlaylist: vi.fn(),
+}));
+
+vi.mock("../bridge", () => ({ bridge }));
+
+const settings = {
+  outputDir: "converted",
+  fetchedDir: "fetched",
+  category: "Music" as const,
+  format: "mp3",
+  bitrate: "320k",
+  sampleRate: 48000,
+  resolution: "original",
+  normalize: false,
+  useGpu: false,
+  saveCover: true,
+  saveMetadata: true,
+  retries: 2,
+};
+
+function renderView(
+  onCreateAccess = vi.fn().mockResolvedValue({ active: true, link: "http://127.0.0.1:4321/access/test", browser: "", bridgeConnected: false }),
+  access: AccessStatus = { active: false, link: "", browser: "", bridgeConnected: false },
+  onStart = vi.fn().mockResolvedValue(undefined),
+  selectedCapture: FetchedMedia | null = null,
+  onSettings = vi.fn(),
+  settingsOverride: Partial<ConverterSettings> = {},
+) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const onStatus = vi.fn();
+  const onError = vi.fn();
+
+  act(() => {
+    root.render(
+      <ConverterView
+        settings={{ ...settings, ...settingsOverride }}
+        runtime={null}
+        events={[]}
+        access={access}
+        selectedCapture={selectedCapture}
+        running={false}
+        progress={0}
+        status="Ready"
+        onSettings={onSettings}
+        onStart={onStart}
+        onCancel={vi.fn().mockResolvedValue(undefined)}
+        onCreateAccess={onCreateAccess}
+        onClearAccess={vi.fn().mockResolvedValue(undefined)}
+        onStatus={onStatus}
+        onError={onError}
+      />,
+    );
+  });
+
+  const updateProps = (newProps: Partial<Parameters<typeof ConverterView>[0]>) => {
+    act(() => {
+      root.render(
+        <ConverterView
+          settings={{ ...settings, ...settingsOverride }}
+          runtime={null}
+          events={[]}
+          access={access}
+          selectedCapture={selectedCapture}
+          running={false}
+          progress={0}
+          status="Ready"
+          onSettings={onSettings}
+          onStart={onStart}
+          onCancel={vi.fn().mockResolvedValue(undefined)}
+          onCreateAccess={onCreateAccess}
+          onClearAccess={vi.fn().mockResolvedValue(undefined)}
+          onStatus={onStatus}
+          onError={onError}
+          {...newProps}
+        />,
+      );
+    });
+  };
+
+  return { container, root, updateProps, onCreateAccess, onStatus, onSettings, onError };
+}
+
+describe("Converter account access feedback", () => {
+  beforeEach(() => {
+    window.scrollTo = vi.fn();
+    bridge.openUrl.mockReset();
+    bridge.openUrl.mockResolvedValue(undefined);
+    bridge.openPath.mockReset();
+    bridge.openPath.mockResolvedValue(undefined);
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true; });
+    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) { this.open = false; });
+  });
+
+  it("offers Open in browser button when source URL is provided", async () => {
+    const view = renderView();
+    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://music.apple.com/us/album/test/123");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+      input?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const openBtn = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Open in browser"));
+    expect(openBtn).toBeDefined();
+
+    await act(async () => { openBtn?.click(); });
+    expect(bridge.openUrl).toHaveBeenCalledWith("https://music.apple.com/us/album/test/123");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("cancels a pending playlist load and closes the loading overlay", async () => {
+    let rejectLoad: (reason: Error) => void = () => {};
+    bridge.loadPlaylist.mockImplementationOnce(() => new Promise((_, reject) => { rejectLoad = reject; }));
+    bridge.cancelPlaylist.mockImplementationOnce(async () => { rejectLoad(new Error("Playlist loading cancelled.")); });
+    const view = renderView();
+    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://example.test/playlist");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+      input?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Playlist tracks"))?.click();
+    });
+    expect(bridge.loadPlaylist).toHaveBeenCalledWith("https://example.test/playlist");
+    const cancel = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Cancel");
+    expect(cancel).toBeDefined();
+    await act(async () => { cancel?.click(); });
+    expect(bridge.cancelPlaylist).toHaveBeenCalledTimes(1);
+    expect(view.onStatus).toHaveBeenCalledWith("Playlist loading cancelled.");
+    expect(view.container.textContent).not.toContain("Loading playlist");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("shows Story items button and loads story catalog when an ephemeral story URL is entered", async () => {
+    bridge.loadPlaylist.mockResolvedValueOnce({
+      title: "Story by shinchewieeee",
+      items: [
+        { index: 1, title: "Story 1", artist: "shinchewieeee", duration: "0:15", url: "https://example.test/s1" },
+      ],
+    });
+    const view = renderView(undefined, undefined, undefined, null, undefined, { allowStoryExtraction: true });
+    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://www.instagram.com/stories/shinchewieeee/");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+      input?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const storyButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Story items"));
+    expect(storyButton).toBeDefined();
+
+    await act(async () => {
+      storyButton?.click();
+    });
+    expect(bridge.loadPlaylist).toHaveBeenCalledWith("https://www.instagram.com/stories/shinchewieeee/");
+    expect(view.onStatus).toHaveBeenCalledWith("Loaded 1 items from Story by shinchewieeee.");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("offers a preserve-quality intent preset that selects source format", async () => {
+    const view = renderView();
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Preserve Quality");
+
+    expect(button).toBeDefined();
+    await act(async () => { button?.click(); await Promise.resolve(); });
+
+    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({
+      format: "source",
+      resolution: "original",
+      normalize: false,
+      useGpu: false,
+    }));
+    expect(view.onStatus).toHaveBeenCalledWith(expect.stringContaining("Applied Preserve Quality preset"));
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("offers image source PNG recovery only as an explicit advanced choice", async () => {
+    const view = renderView(undefined, undefined, undefined, null, undefined, { category: "Image", format: "source" });
+    expect(view.container.textContent).not.toContain("Allow PNG recovery");
+    const advanced = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Advanced settings"));
+    await act(async () => { advanced?.click(); await Promise.resolve(); });
+    const recovery = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Allow PNG recovery"));
+    expect(recovery?.textContent).toContain("show the format change");
+    await act(async () => { recovery?.querySelector("input")?.click(); await Promise.resolve(); });
+    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({ allowPngFallback: true }));
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("toggles archival vault fallback under advanced settings", async () => {
+    const view = renderView();
+    const advanced = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Advanced settings"));
+    await act(async () => { advanced?.click(); await Promise.resolve(); });
+    const archival = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Search archival vaults"));
+    expect(archival?.textContent).toContain("Wayback Machine");
+    await act(async () => { archival?.querySelector("input")?.click(); await Promise.resolve(); });
+    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({ archivalFallback: true }));
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("unselects a preset and restores the prior manual settings", async () => {
+    const view = renderView();
+    const presetButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Studio Master");
+
+    expect(presetButton).toBeDefined();
+    expect(view.container.textContent).not.toContain("No preset");
+    await act(async () => { presetButton?.click(); await Promise.resolve(); });
+    expect(presetButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "wav" }));
+
+    await act(async () => { presetButton?.click(); await Promise.resolve(); });
+    expect(presetButton?.getAttribute("aria-pressed")).toBe("false");
+    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "mp3", bitrate: "320k", category: "Music" }));
+    expect(view.onStatus).toHaveBeenCalledWith(expect.stringContaining("previous conversion settings were restored"));
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("leaves archival fallback disabled by default on presets, while allowing manual enable", async () => {
+    const view = renderView();
+    const presetButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Studio Master");
+    expect(presetButton).toBeDefined();
+
+    // 1. Selecting preset keeps archivalFallback false by default
+    await act(async () => { presetButton?.click(); await Promise.resolve(); });
+    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "wav", archivalFallback: false }));
+
+    // 2. User can expand Advanced settings and disable archival fallback
+    const advanced = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Advanced settings"));
+    await act(async () => { advanced?.click(); await Promise.resolve(); });
+    const archival = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Search archival vaults"));
+    expect(archival).toBeDefined();
+    // Re-render with archivalFallback true to test toggle off
+    await act(async () => {
+      view.root.render(
+        <ConverterView
+          settings={{ ...settings, archivalFallback: true }}
+          runtime={null}
+          events={[]}
+          access={{ active: false, link: "", browser: "", bridgeConnected: false }}
+          selectedCapture={null}
+          running={false}
+          progress={0}
+          status="Ready"
+          onSettings={view.onSettings}
+          onStart={vi.fn()}
+          onCancel={vi.fn()}
+          onCreateAccess={vi.fn()}
+          onClearAccess={vi.fn()}
+          onStatus={view.onStatus}
+          onError={view.onError}
+        />
+      );
+    });
+    const archivalChecked = Array.from(view.container.querySelectorAll("label")).find((item) => item.textContent?.includes("Search archival vaults"));
+    await act(async () => { archivalChecked?.querySelector("input")?.click(); await Promise.resolve(); });
+    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ archivalFallback: false }));
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("restores video settings and keeps relevant advanced controls available", async () => {
+    const view = renderView(undefined, undefined, undefined, null, vi.fn(), { category: "Video", format: "mkv", bitrate: "best" });
+    const presetButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Universal Video");
+
+    await act(async () => { presetButton?.click(); await Promise.resolve(); });
+    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "mp4", resolution: "1080p" }));
+    await act(async () => { presetButton?.click(); await Promise.resolve(); });
+    expect(view.onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ format: "mkv", resolution: "original", useGpu: false }));
+
+    const advancedSwitch = view.container.querySelector<HTMLButtonElement>('button[role="switch"]');
+    await act(async () => { advancedSwitch?.click(); await Promise.resolve(); });
+    expect(advancedSwitch?.getAttribute("aria-checked")).toBe("true");
+    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Video quality"]')?.disabled).toBe(false);
+    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Video resolution"]')?.disabled).toBe(false);
+    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Audio bitrate"]')?.disabled).toBe(false);
+    expect(view.container.querySelector<HTMLSelectElement>('select[aria-label="Audio sample rate"]')).toBeNull();
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("exposes playlist download strategy outside advanced settings and switches modes", async () => {
+    const onSettings = vi.fn();
+    const view = renderView(undefined, undefined, undefined, null, onSettings);
+
+    const concurrentBtn = Array.from(view.container.querySelectorAll("button")).find((item) =>
+      item.textContent?.includes("Concurrent (Parallel)"),
+    );
+    expect(concurrentBtn).toBeDefined();
+
+    await act(async () => {
+      concurrentBtn?.click();
+      await Promise.resolve();
+    });
+    expect(onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ playlistMode: "concurrent", concurrency: 4 }));
+
+    const linearBtn = Array.from(view.container.querySelectorAll("button")).find((item) =>
+      item.textContent?.includes("Linear (Sequential)"),
+    );
+    expect(linearBtn).toBeDefined();
+
+    await act(async () => {
+      linearBtn?.click();
+      await Promise.resolve();
+    });
+    expect(onSettings).toHaveBeenLastCalledWith(expect.objectContaining({ playlistMode: "linear", concurrency: 1 }));
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("displays revised source notes for Apple Music adaptive fallback, Spotify, and browser session", async () => {
+    const view = renderView();
+    const notesBtn = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Source notes and fallback engine"));
+    expect(notesBtn).toBeDefined();
+
+    await act(async () => { notesBtn?.click(); });
+    expect(view.container.textContent).toContain("Apple Music & Spotify Matching");
+    expect(view.container.textContent).toContain("Public Media & File Uploads");
+    expect(view.container.textContent).toContain("Desktop Application Exclusive");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("auto-opens online source in browser when openInBrowser setting is enabled", async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    const view = renderView(undefined, undefined, onStart, null, undefined, { openInBrowser: true });
+    const input = view.container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "https://www.facebook.com/reel/12345");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+      input?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const convertBtn = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Convert media"));
+    await act(async () => { convertBtn?.click(); });
+
+    expect(bridge.openUrl).toHaveBeenCalledWith("https://www.facebook.com/reel/12345");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("starts conversion from browser capture without requiring a source URL", async () => {
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    const view = renderView(
+      undefined,
+      { active: true, link: "http://127.0.0.1:4321/access/test", browser: "Vivaldi", bridgeConnected: true },
+      onStart,
+    );
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.includes("Convert media"));
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+
+    expect(onStart).toHaveBeenCalledWith("", undefined);
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("captures a public Facebook album before starting its local download", async () => {
+    const source = "https://www.facebook.com/share/p/1EpX6FjAuC/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureFacebookAlbum.mockReset();
+    bridge.captureFacebookAlbum.mockResolvedValue({
+      captureId: "12345678-1234-1234-1234-123456789abc",
+      title: "Public album",
+      photoCount: 9,
+      mediaKind: "photo",
+    });
+    const view = renderView(undefined, undefined, onStart);
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+
+    expect(bridge.captureFacebookAlbum).toHaveBeenCalledWith(source, expect.any(String));
+    expect(onStart).toHaveBeenCalledWith(source, undefined, "12345678-1234-1234-1234-123456789abc");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("releases the Facebook guest session if conversion cannot start", async () => {
+    const source = "https://www.facebook.com/share/p/1EpX6FjAuC/";
+    const onStart = vi.fn().mockResolvedValue(false);
+    bridge.captureFacebookAlbum.mockReset();
+    bridge.captureFacebookAlbum.mockResolvedValue({
+      captureId: "12345678-1234-1234-1234-123456789abc",
+      title: "Public album",
+      photoCount: 2,
+      mediaKind: "photo",
+    });
+    bridge.cancelFacebookAlbum.mockReset().mockResolvedValue(undefined);
+    const view = renderView(undefined, undefined, onStart);
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onStart).toHaveBeenCalledWith(source, undefined, "12345678-1234-1234-1234-123456789abc");
+    expect(bridge.cancelFacebookAlbum).toHaveBeenCalledWith(expect.any(String));
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("routes a Facebook video-only post through the existing video extractor", async () => {
+    const source = "https://www.facebook.com/share/p/video-post/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureFacebookAlbum.mockReset();
+    bridge.captureFacebookAlbum.mockResolvedValue({
+      captureId: "12345678-1234-1234-1234-123456789abc",
+      title: "Public video",
+      photoCount: 0,
+      mediaKind: "video",
+    });
+    const view = renderView(undefined, undefined, onStart);
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(bridge.captureFacebookAlbum).toHaveBeenCalledWith(source, expect.any(String));
+    expect(onStart).toHaveBeenCalledWith(source, undefined, undefined, undefined, "video");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("falls back to onStart when Facebook guest capture redirects to sign-in", async () => {
+    const source = "https://www.facebook.com/share/p/1EZzZ7RdBe/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureFacebookAlbum.mockReset();
+    bridge.captureFacebookAlbum.mockRejectedValue(
+      new Error("Facebook redirected the post or photo viewer to a sign-in page before JaneConverter could reach its public photos.")
+    );
+    const view = renderView(undefined, undefined, onStart);
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(bridge.captureFacebookAlbum).toHaveBeenCalledWith(source, expect.any(String));
+    expect(onStart).toHaveBeenCalledWith(source, undefined);
+    expect(view.onError).not.toHaveBeenCalled();
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("inspects an Instagram /p/ post and routes to video conversion when video is detected", async () => {
+    const source = "https://www.instagram.com/p/DdwWRyTRMut/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureSocialPostPhotos.mockReset();
+    bridge.captureSocialPostPhotos.mockResolvedValue({
+      captureId: "12345678-1234-1234-1234-123456789abc",
+      title: "Instagram video post",
+      photoCount: 0,
+      mediaKind: "video",
+    });
+    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
+      category: "Video",
+      format: "mp4",
+      bitrate: "balanced",
+      resolution: "1080p",
+    });
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(bridge.captureSocialPostPhotos).toHaveBeenCalledWith(source, expect.any(String));
+    expect(onStart).toHaveBeenCalledWith(source, undefined, undefined, undefined, "video");
+    expect(view.onStatus).toHaveBeenCalledWith("This Instagram post contains video. Starting the video conversion...");
+    expect(button?.textContent?.trim()).toBe("Convert media");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("captures photos from a username-prefixed Instagram /p/ post even when Preserve Quality (Video/source) is active", async () => {
+    const source = "https://www.instagram.com/justinaxiecl/p/DFMyvpiSgxW/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureSocialPostPhotos.mockReset();
+    bridge.captureSocialPostPhotos.mockResolvedValue({
+      captureId: "12345678-1234-1234-1234-123456789abc",
+      title: "Carousel post",
+      photoCount: 5,
+      mediaKind: "photo",
+    });
+    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
+      category: "Video",
+      format: "source",
+      bitrate: "best",
+      resolution: "original",
+    });
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(bridge.captureSocialPostPhotos).toHaveBeenCalledWith(source, expect.any(String));
+    expect(onStart).toHaveBeenCalledWith(source, undefined, undefined, "12345678-1234-1234-1234-123456789abc");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("bypasses slow guest capture and directly starts conversion when readBrowserCookies is enabled for Instagram", async () => {
+    const source = "https://www.instagram.com/p/DeRahM1CQLf/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureSocialPostPhotos.mockReset();
+    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
+      readBrowserCookies: true,
+    });
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(bridge.captureSocialPostPhotos).not.toHaveBeenCalled();
+    expect(onStart).toHaveBeenCalledWith(source, undefined);
+    expect(view.onStatus).toHaveBeenCalledWith("Reading Instagram post using your active browser session...");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("bypasses slow guest capture and directly starts conversion when readBrowserCookies is enabled for Facebook", async () => {
+    const source = "https://www.facebook.com/share/p/1EpX6FjAuC/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureFacebookAlbum.mockReset();
+    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
+      readBrowserCookies: true,
+    });
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(bridge.captureFacebookAlbum).not.toHaveBeenCalled();
+    expect(onStart).toHaveBeenCalledWith(source, undefined);
+    expect(view.onStatus).toHaveBeenCalledWith("Reading Facebook post using your active browser session...");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("sends a Facebook post to video conversion when the video preset is selected", async () => {
+    const source = "https://www.facebook.com/share/p/1EfkMDVBB1/";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureFacebookAlbum.mockReset();
+    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
+      category: "Video",
+      format: "mp4",
+      bitrate: "balanced",
+      resolution: "1080p",
+    });
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(onStart).toHaveBeenCalledWith(source, undefined);
+    expect(bridge.captureFacebookAlbum).not.toHaveBeenCalled();
+    expect(view.onStatus).toHaveBeenCalledWith("Sending this Facebook post to the video converter...");
+    expect(button?.textContent?.trim()).toBe("Convert media");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("sends an X/Twitter post to video conversion when the video preset is selected", async () => {
+    const source = "https://x.com/Naskomusic/status/2110194682684956686?s=20";
+    const onStart = vi.fn().mockResolvedValue(undefined);
+    bridge.captureSocialPostPhotos.mockReset();
+    const view = renderView(undefined, undefined, onStart, null, vi.fn(), {
+      category: "Video",
+      format: "mp4",
+      bitrate: "balanced",
+      resolution: "1080p",
+    });
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, source);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const button = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Convert media");
+    await act(async () => { button?.click(); await Promise.resolve(); });
+    expect(onStart).toHaveBeenCalledWith(source, undefined);
+    expect(bridge.captureSocialPostPhotos).not.toHaveBeenCalled();
+    expect(view.onStatus).toHaveBeenCalledWith("Sending this X/Twitter post to the video converter...");
+    expect(button?.textContent?.trim()).toBe("Convert media");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("does not lock output controls to an unselected browser capture", async () => {
+    const view = renderView(undefined, {
+      active: true,
+      link: "http://127.0.0.1:4321/access/test",
+      browser: "Vivaldi",
+      bridgeConnected: true,
+      capturedMediaKind: "video",
+    });
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(view.onSettings).not.toHaveBeenCalled();
+    const imageButton = Array.from(view.container.querySelectorAll("button")).find((item) => item.textContent === "Image");
+    expect(imageButton).toBeDefined();
+    await act(async () => { imageButton?.click(); });
+    expect(view.onSettings).toHaveBeenCalledWith(expect.objectContaining({ category: "Image" }));
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+  it("switches to image output when the browser capture is an image", async () => {
+    const view = renderView(
+      undefined,
+      {
+        active: true,
+        link: "http://127.0.0.1:4321/access/test",
+        browser: "Vivaldi",
+        bridgeConnected: true,
+        capturedMediaKind: "image",
+      },
+      undefined,
+      { path: "fetched/image.jpg", name: "image.jpg", mediaKind: "image", mimeType: "image/jpeg", captureMode: "network", title: "image", size: 1000 },
+    );
+
+    await act(async () => { await Promise.resolve(); });
+
+    expect(view.container.textContent).toContain("Image");
+    expect((view.container.querySelector('select[aria-label="Container format"]') as HTMLSelectElement | null)?.value).toBe("jpg");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("handles dropped web links and files into the converter", async () => {
+    const view = renderView();
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+
+    // Test dropping a web URL
+    await act(async () => {
+      const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEvent, "dataTransfer", {
+        value: {
+          files: [],
+          getData: (format: string) => (format === "text/uri-list" ? "https://youtube.com/watch?v=12345" : ""),
+        },
+      });
+      input.dispatchEvent(dropEvent);
+      await Promise.resolve();
+    });
+
+    expect(input.value).toBe("https://youtube.com/watch?v=12345");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("queues an item, displays it in the Conversion Queue, and allows removing it", async () => {
+    const view = renderView();
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "https://youtube.com/watch?v=leroy123");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const queueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Queue");
+    expect(queueButton).toBeDefined();
+
+    await act(async () => {
+      queueButton?.click();
+    });
+
+    expect(view.container.textContent).toContain("Conversion Queue");
+    expect(view.container.textContent).toContain("https://youtube.com/watch?v=leroy123");
+
+    const removeButton = view.container.querySelector('button[title="Remove from queue"]') as HTMLButtonElement;
+    expect(removeButton).not.toBeNull();
+
+    await act(async () => {
+      removeButton.click();
+    });
+
+    expect(view.container.textContent).not.toContain("Conversion Queue");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("starts the queued items sequentially when start queue is clicked without cascading concurrent jobs", async () => {
+    const onStart = vi.fn().mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(true), 50)));
+    const view = renderView(undefined, undefined, onStart);
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+
+    const queueUrl = async (url: string) => {
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, url);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const queueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Queue");
+      await act(async () => {
+        queueButton?.click();
+      });
+    };
+
+    await queueUrl("https://youtube.com/watch?v=item1");
+    await queueUrl("https://youtube.com/watch?v=item2");
+    await queueUrl("https://youtube.com/watch?v=item3");
+
+    const startQueueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.includes("Start queue"));
+    expect(startQueueButton).toBeDefined();
+
+    await act(async () => {
+      startQueueButton?.click();
+    });
+
+    // Crucial check: only the FIRST item is started; item2 and item3 are strictly locked out
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=item1", undefined);
+    expect(onStart).not.toHaveBeenCalledWith("https://youtube.com/watch?v=item2", undefined);
+    expect(onStart).not.toHaveBeenCalledWith("https://youtube.com/watch?v=item3", undefined);
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("advances automatically to item #2 when item #1 completes", async () => {
+    const onStart = vi.fn().mockResolvedValue(true);
+    const view = renderView(undefined, undefined, onStart);
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+
+    const queueUrl = async (url: string) => {
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, url);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const queueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Queue");
+      await act(async () => {
+        queueButton?.click();
+      });
+    };
+
+    await queueUrl("https://youtube.com/watch?v=item1");
+    await queueUrl("https://youtube.com/watch?v=item2");
+
+    const startQueueButton = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.includes("Start queue"));
+    await act(async () => {
+      startQueueButton?.click();
+    });
+
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=item1", undefined);
+
+    // Simulate item #1 completing
+    await act(async () => {
+      view.updateProps({
+        events: [{ jobId: "item1", kind: "finished", message: "Conversion complete: item1.mp3" }],
+        running: false,
+      });
+    });
+
+    // Item #2 must have been started automatically!
+    expect(onStart).toHaveBeenCalledTimes(2);
+    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=item2", undefined);
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("queues an item when clicking Convert media while an operation is already active and starts it when current conversion completes", async () => {
+    const onStart = vi.fn().mockResolvedValue(true);
+    const view = renderView(undefined, undefined, onStart);
+    await act(async () => {
+      view.updateProps({ running: true });
+    });
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "https://youtube.com/watch?v=queuedItem");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const convertBtn = Array.from(view.container.querySelectorAll("button")).find((btn) => btn.textContent?.trim() === "Convert media");
+    expect(convertBtn).toBeDefined();
+    expect(convertBtn?.disabled).toBe(false);
+
+    // Clicking Convert media while running should queue it instead of calling onStart directly
+    await act(async () => {
+      convertBtn?.click();
+    });
+
+    expect(view.container.textContent).toContain("Conversion Queue");
+    expect(onStart).not.toHaveBeenCalled();
+
+    // Now simulate the active conversion finishing (running becomes false)
+    await act(async () => {
+      view.updateProps({
+        events: [{ jobId: "standalone-job", kind: "finished", message: "Conversion complete: initial.mp3" }],
+        running: false,
+      });
+    });
+
+    // The queued item must now automatically start converting!
+    expect(onStart).toHaveBeenCalledTimes(1);
+    expect(onStart).toHaveBeenCalledWith("https://youtube.com/watch?v=queuedItem", undefined);
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("allows toggling harmonic exciter in advanced settings and displays explanation", async () => {
+    const onSettings = vi.fn();
+    const view = renderView(undefined, undefined, undefined, null, onSettings, {
+      category: "Music",
+      format: "mp3",
+      reconstructFrequencyLoss: false,
+    });
+    const advancedSwitch = view.container.querySelector<HTMLButtonElement>('button[role="switch"]');
+    await act(async () => { advancedSwitch?.click(); await Promise.resolve(); });
+
+    const checkboxes = Array.from(view.container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'));
+    const reconCheckbox = checkboxes.find((c) => c.closest("label")?.textContent?.includes("Harmonic Exciter"));
+    expect(reconCheckbox).toBeDefined();
+    expect(reconCheckbox?.checked).toBe(false);
+
+    await act(async () => {
+      reconCheckbox?.click();
+      await Promise.resolve();
+    });
+    expect(onSettings).toHaveBeenCalledWith(expect.objectContaining({ reconstructFrequencyLoss: true }));
+
+    await act(async () => {
+      view.updateProps({
+        settings: {
+          outputDir: "converted",
+          fetchedDir: "fetched",
+          category: "Music",
+          format: "mp3",
+          bitrate: "320k",
+          sampleRate: 48000,
+          resolution: "original",
+          normalize: false,
+          useGpu: false,
+          saveCover: true,
+          saveMetadata: true,
+          reconstructFrequencyLoss: true,
+          retries: 2,
+        },
+      });
+    });
+    expect(view.container.textContent).toContain("Harmonic Exciter (High-Frequency Sparkle / Studio Air)");
+    expect(view.container.textContent).toContain("What it does:");
+    expect(view.container.textContent).toContain("What to expect:");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("handles dropped converted-library file with a single status response and deduplicates rapid drops", async () => {
+    (bridge.isConvertedLibraryPath as unknown as { mockResolvedValue: (v: boolean) => void }).mockResolvedValue(true);
+    const view = renderView();
+
+    const dropSection = view.container.querySelector("section");
+    expect(dropSection).not.toBeNull();
+
+    const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(dropEvent, "dataTransfer", {
+      value: {
+        files: [{ path: "I:/Files 1/JaneConverter Export Library 1/converted/song.mp3", name: "song.mp3" }],
+        getData: vi.fn().mockReturnValue(""),
+      },
+    });
+
+    // Fire first drop
+    await act(async () => {
+      dropSection?.dispatchEvent(dropEvent);
+      await Promise.resolve();
+    });
+
+    // Fire duplicate rapid drop (e.g. DOM event + Tauri event collision)
+    await act(async () => {
+      dropSection?.dispatchEvent(dropEvent);
+      await Promise.resolve();
+    });
+
+    expect(view.onStatus).toHaveBeenCalledTimes(1);
+    expect(view.onStatus).toHaveBeenCalledWith(
+      "Converted-library files can be dragged out to other apps, but can't be dropped back into JaneConverter."
+    );
+
+    (bridge.isConvertedLibraryPath as unknown as { mockResolvedValue: (v: boolean) => void }).mockResolvedValue(false);
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("does not re-open file dialog when user closes or cancels file browse", async () => {
+    (bridge.chooseFiles as unknown as { mockResolvedValue: (v: string[]) => void }).mockResolvedValue([]);
+    const view = renderView();
+
+    const browseBtn = Array.from(view.container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Browse")
+    );
+    expect(browseBtn).toBeDefined();
+
+    await act(async () => {
+      browseBtn?.click();
+      await Promise.resolve();
+    });
+
+    expect(bridge.chooseFiles).toHaveBeenCalledTimes(1);
+    expect(bridge.chooseFile).not.toHaveBeenCalled();
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+it("groupIndexesByPreset groups selected items by their distinct presets", () => {
+    const presetA = {
+      id: "preset-a",
+      name: "Preset A",
+      category: "Video" as const,
+      group: "Video" as const,
+      format: "mp4",
+      bitrate: "balanced",
+      sampleRate: 48000,
+      resolution: "1080p",
+      normalize: false,
+      useGpu: true,
+      description: "A",
+    };
+    const presetB = {
+      id: "preset-b",
+      name: "Preset B",
+      category: "Audio" as const,
+      group: "Music" as const,
+      format: "mp3",
+      bitrate: "320k",
+      sampleRate: 44100,
+      resolution: "original",
+      normalize: true,
+      useGpu: false,
+      description: "B",
+    };
+
+    const single = groupIndexesByPreset("1,2,3", presetA, {});
+    expect(single).toEqual([{ indexes: "1,2,3", preset: presetA }]);
+
+    const split = groupIndexesByPreset("1,2,3", presetA, { 2: presetB });
+    expect(split).toHaveLength(2);
+    expect(split).toEqual(
+      expect.arrayContaining([
+        { indexes: "1,3", preset: presetA },
+        { indexes: "2", preset: presetB },
+      ])
+    );
+  });
+
+  it("renders completion prompt with dismiss close button next to use as source and closes when clicked", async () => {
+    const view = renderView();
+    await act(async () => {
+      view.updateProps({
+        events: [
+          {
+            jobId: "job-1",
+            kind: "finished",
+            message: "Conversion complete: song.mp3",
+            output: "C:/output/song.mp3",
+          },
+        ],
+      });
+    });
+
+    expect(view.container.textContent).toContain("song.mp3");
+    expect(view.container.textContent).toContain("Conversion finished and verified via ffprobe.");
+
+    const useAsSourceBtn = Array.from(view.container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Use as source")
+    );
+    expect(useAsSourceBtn).toBeDefined();
+
+    const closeBtn = view.container.querySelector('button[aria-label="Close completion prompt"]') as HTMLButtonElement | null;
+    expect(closeBtn).not.toBeNull();
+
+    const openFolderBtn = Array.from(view.container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Open folder")
+    );
+    expect(openFolderBtn).toBeDefined();
+
+    await act(async () => {
+      openFolderBtn?.click();
+      await Promise.resolve();
+    });
+
+    expect(bridge.openPath).toHaveBeenCalledWith("C:/output/song.mp3");
+
+    await act(async () => {
+      closeBtn?.click();
+      await Promise.resolve();
+    });
+
+    expect(view.container.textContent).not.toContain("Conversion finished and verified via ffprobe.");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("resolves the exact folder from event history lines when finished event lacks output", async () => {
+    const view = renderView();
+    await act(async () => {
+      view.updateProps({
+        events: [
+          {
+            jobId: "job-album-1",
+            kind: "progress",
+            message: "Export Directory: D:/Music/Skrillex - Quest For Fire (FULL ALBUM 2023)",
+          },
+          {
+            jobId: "job-album-1",
+            kind: "finished",
+            message: "Conversion finished. Your media is ready.",
+          },
+        ],
+      });
+    });
+
+    expect(view.container.textContent).toContain("Skrillex - Quest For Fire (FULL ALBUM 2023)");
+
+    const openFolderBtn = Array.from(view.container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Open folder")
+    );
+    expect(openFolderBtn).toBeDefined();
+
+    await act(async () => {
+      openFolderBtn?.click();
+      await Promise.resolve();
+    });
+
+    expect(bridge.openPath).toHaveBeenCalledWith("D:/Music/Skrillex - Quest For Fire (FULL ALBUM 2023)");
+
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+
+  it("shows an Instagram profile banner and button to redirect to active stories", async () => {
+    const profileUrl = "https://www.instagram.com/mzwerr/";
+    const view = renderView();
+    const input = view.container.querySelector('input[aria-label="Source media URL or local path"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, profileUrl);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(view.container.textContent).toContain("Instagram Profile Detected (@mzwerr)");
+    const fetchStoryBtn = Array.from(view.container.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Fetch Story (@mzwerr)")
+    );
+    expect(fetchStoryBtn).toBeDefined();
+
+    await act(async () => {
+      fetchStoryBtn?.click();
+      await Promise.resolve();
+    });
+
+    expect(input.value).toBe("https://www.instagram.com/stories/mzwerr/");
+    await act(async () => { view.root.unmount(); });
+    view.container.remove();
+  });
+});

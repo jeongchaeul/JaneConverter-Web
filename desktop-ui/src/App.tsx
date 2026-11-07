@@ -6,9 +6,10 @@ import { motion } from "framer-motion";
 import { AlertCircle, CheckCircle2, Clock, FolderOpen, GripVertical, HardDrive, Play, RotateCcw, X } from "lucide-react";
 import { bridge, type AccessStatus, type ConversionHistoryItem, type ConverterEvent, type ConverterSettings, type FetchedMedia, type RuntimeInfo, type UpdateCheckResult } from "./bridge";
 import { Sidebar, type ViewKey } from "./components/Sidebar";
-import { Topbar } from "./components/Topbar";
 import { ConverterView } from "./components/ConverterView";
 import { SettingsView } from "./components/SettingsView";
+import { LibraryView } from "./components/LibraryView";
+import { UserManualView } from "./components/UserManualView";
 import { detectCategoryFromPath, findPresetName, formatBytes, formatElapsedMs } from "./options";
 import { appendOrCollapseProgressEvent, extractYouTubeUrlFromThumbnail } from "./components/inprogress/parser";
 import { clearAppearanceStorage, loadAppearanceFromStorage, saveAppearanceToStorage, type AppearanceSettings } from "./utils/appearanceStorage";
@@ -974,6 +975,16 @@ export default function App() {
       onSaveAppearance={handleSaveAppearance}
       onStatus={statusMessage}
     />
+  ) : activeView === "library" ? (
+    <LibraryView
+      history={history}
+      onClearHistory={handleClearHistory}
+      onRemoveHistoryItem={handleRemoveHistoryItem}
+      onStatus={statusMessage}
+      onNavigateToConverter={() => setActiveView("converter")}
+    />
+  ) : activeView === "manual" ? (
+    <UserManualView />
   ) : null;
 
   return (
@@ -1014,8 +1025,6 @@ export default function App() {
       <div className="pointer-events-none absolute -right-28 -top-36 h-[390px] w-[700px] rounded-full top-right-glow ambient-orb" style={{ animationDelay: "-6s" }} />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,.018),transparent_35%)]" />
 
-      {/* Custom Window Header & Controls */}
-      <Topbar runtime={runtime} />
 
       {/* Main Workspace Frame */}
       <div className="relative flex min-h-0 flex-1 w-full overflow-hidden">

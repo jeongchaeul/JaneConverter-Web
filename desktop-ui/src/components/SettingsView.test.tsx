@@ -33,7 +33,7 @@ describe("Settings updates", () => {
     setDataRoot.run.mockReset();
   });
 
-  it("shows the update result inside Settings", async () => {
+  it("renders continuous auto-updates card and Web Lite quotas", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -42,58 +42,26 @@ describe("Settings updates", () => {
       root.render(<SettingsView runtime={sourceRuntime} onStatus={vi.fn()} initialTab="system" />);
     });
 
-    const check = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Check now"));
-    expect(check).toBeDefined();
-    await act(async () => {
-      check?.click();
-      await Promise.resolve();
-    });
-
-    expect(container.querySelector('[role="status"]')?.textContent).toContain("Update check complete");
+    expect(container.textContent).toContain("Continuous Auto-Updates");
+    expect(container.textContent).toContain("Max Duration");
+    expect(container.textContent).toContain("3 Hours (10,800s)");
+    expect(container.textContent).toContain("1080p (FHD)");
+    expect(container.textContent).toContain("50 Tracks / Batch");
 
     await act(async () => { root.unmount(); });
     container.remove();
   });
 
-  it("lets the user dismiss an application update and check again", async () => {
-    const available = {
-      message: "Update check complete. JaneConverter update available: v2.2.0 -> v2.3.0.",
-      repo: {
-        has_update: true,
-        current_version: "2.2.0",
-        latest_version: "2.3.0",
-        installer_available: true,
-        release_url: "https://github.com/janecerys/JaneConverter/releases/tag/v2.3.0",
-      },
-    };
-    updateCheck.run.mockReset();
-    updateCheck.run.mockResolvedValue(available);
-    installUpdate.run.mockResolvedValue(undefined);
-
+  it("renders the desktop exclusive capabilities section in system settings", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
     await act(async () => { root.render(<SettingsView runtime={sourceRuntime} onStatus={vi.fn()} initialTab="system" />); });
 
-    const check = () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Check now"));
-    await act(async () => { check()?.click(); await Promise.resolve(); });
-    expect(container.textContent).toContain("JaneConverter v2.3.0 is available");
-    expect(container.textContent).toContain("Update now");
-    expect(container.textContent).toContain("Not now");
-
-    await act(async () => {
-      Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Not now")?.click();
-      await Promise.resolve();
-    });
-    expect(container.textContent).not.toContain("JaneConverter v2.3.0 is available");
-
-    await act(async () => { check()?.click(); await Promise.resolve(); });
-    expect(container.textContent).toContain("Update now");
-    await act(async () => {
-      Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Update now")?.click();
-      await Promise.resolve();
-    });
-    expect(installUpdate.run).toHaveBeenCalledWith();
+    expect(container.textContent).toContain("Desktop Application Capabilities");
+    expect(container.textContent).toContain("Hardware GPU Acceleration");
+    expect(container.textContent).toContain("FL Studio Project Downgrader");
+    expect(container.textContent).toContain("Browser Session Cookies");
 
     await act(async () => { root.unmount(); });
     container.remove();

@@ -1,13 +1,14 @@
-import { Activity, Cpu, FileAudio, FolderOpen, Inbox, PanelLeftClose, PanelLeftOpen, Settings2, TerminalSquare } from "lucide-react";
+import { Activity, BookOpen, FileAudio, FolderOpen, PanelLeftClose, PanelLeftOpen, Settings2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { hexToRgba } from "../utils/appearanceStorage";
 
-export type ViewKey = "converter" | "settings";
+export type ViewKey = "converter" | "library" | "manual" | "settings";
 
 const workspaceItems: Array<{ key: ViewKey; label: string; icon: typeof FileAudio }> = [
   { key: "converter", label: "Converter", icon: FileAudio },
-  { key: "settings", label: "Settings", icon: Settings2 },
+  { key: "library", label: "Library", icon: FolderOpen },
+  { key: "manual", label: "User Manual", icon: BookOpen },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = "janecoverter.sidebar.collapsed";

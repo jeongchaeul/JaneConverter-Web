@@ -246,8 +246,7 @@ export function SettingsView({
         <div className="mono-label">Settings &amp; Configuration</div>
         <h1 className="mt-2 text-3xl font-semibold tracking-[-.04em] text-white">Customize your conversion engine.</h1>
         <p className="mt-1.5 text-sm text-zinc-500">
-          {runtime?.packaged ? "Running from a production package." : "Running from a source checkout."} Configure
-          hardware acceleration, session authentication, and personalization.
+          Personalize themes and review runtime quotas. Advanced hardware acceleration, local folder management, and session authentication are exclusive to the desktop application.
         </p>
 
         {/* Tab Filter Pills */}
@@ -311,20 +310,7 @@ export function SettingsView({
       )}
 
       {activeTab === "system" && (
-        <SettingsSystemTab
-          runtime={runtime}
-          effectiveUpdateResult={effectiveUpdateResult}
-          checking={checking}
-          isCheckingUpdates={isCheckingUpdates}
-          installing={installing}
-          updateDismissed={updateDismissed}
-          setUpdateDismissed={setUpdateDismissed}
-          setMessage={setMessage}
-          updates={updates}
-          installUpdate={installUpdate}
-          onOpenChangesModal={onOpenChangesModal}
-          setShowLocalChangesModal={setShowLocalChangesModal}
-        />
+        <SettingsSystemTab runtime={runtime} />
       )}
 
       {activeTab === "guide" && (
@@ -339,7 +325,7 @@ export function SettingsView({
         role="status"
         aria-live="polite"
       >
-        {message || "Update and relaunch results appear here."}
+        {message}
       </div>
       <div className="flex items-center gap-2 text-[11px] text-zinc-700">
         <ExternalLink size={12} />{" "}

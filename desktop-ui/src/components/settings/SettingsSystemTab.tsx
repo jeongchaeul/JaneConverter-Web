@@ -1,324 +1,153 @@
-import {
-  CheckCircle2,
-  ExternalLink,
-  HardDrive,
-  RefreshCw,
-  ShieldCheck,
-  Sparkles,
-} from "lucide-react";
-import type { RuntimeInfo, UpdateCheckResult } from "../../bridge";
-import { bridge } from "../../bridge";
-function isAppUpdateAvailable(repoUpdate?: { has_update?: boolean } | null): boolean {
-  return Boolean(repoUpdate?.has_update);
-}
-
-export function SettingsSystemTab({
-  runtime,
-  effectiveUpdateResult,
-  checking,
-  isCheckingUpdates,
-  installing,
-  updateDismissed,
-  setUpdateDismissed,
-  setMessage,
-  updates,
-  installUpdate,
-  onOpenChangesModal,
-  setShowLocalChangesModal,
-}: {
-  runtime: RuntimeInfo | null;
-  effectiveUpdateResult: UpdateCheckResult | null;
-  checking: boolean;
-  isCheckingUpdates?: boolean;
-  installing: boolean;
-  updateDismissed: boolean;
-  setUpdateDismissed: (dismissed: boolean) => void;
-  setMessage: (msg: string) => void;
-  updates: () => Promise<void>;
-  installUpdate: () => Promise<void>;
-  onOpenChangesModal?: () => void;
-  setShowLocalChangesModal: (show: boolean) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-        <HardDrive className="size-3.5" style={{ color: "var(--accent-color, #c52b68)" }} />
-        System Diagnostics &amp; Updates
-      </div>
-
-      {/* Runtime Readiness */}
-      <section className="panel p-5">
-        <div className="flex items-center gap-2 text-sm text-zinc-200">
-          <HardDrive size={16} className="text-zinc-500" /> Runtime Readiness
-        </div>
-        <div className="mt-3.5 grid gap-2 md:grid-cols-2">
-          {[
-            ["Python", runtime?.pythonReady, runtime?.pythonPath],
-            ["FFmpeg", runtime?.ffmpegReady, runtime?.ffmpegPath || "Required by conversion and media probing"],
-            ["GPU", runtime?.gpuAvailable, runtime?.gpuLabel],
-            ["Data root", true, runtime?.dataRoot],
-          ].map(([label, ready, detail]) => (
-            <div key={String(label)} className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2.5">
-              <div className="flex items-center gap-2 text-xs text-zinc-300">
-                {ready ? (
-                  <CheckCircle2 className="size-3.5 text-emerald-400" />
-                ) : (
-                  <span className="size-3.5 rounded-full border border-amber-400/50" />
-                )}
-                {label}
-              </div>
-              <div className="mt-1 truncate font-mono text-[10px] text-zinc-500">{String(detail ?? "Checking...")}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Check for updates */}
-      <section className="panel space-y-4 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="text-sm font-medium text-zinc-200">Check for Updates</div>
-            <div className="mt-1 text-xs text-zinc-500">
-              Checks for JaneConverter application, yt-dlp extractor, and FFmpeg transcoder updates.
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={checking || isCheckingUpdates || installing}
-            onClick={() => void updates()}
-            className="subtle-button flex items-center gap-2 px-4 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
-          >
-            <RefreshCw className={`size-3.5 ${(checking || isCheckingUpdates) ? "animate-spin" : ""}`} />
-            {(checking || isCheckingUpdates) ? "Checking..." : "Check now"}
-          </button>
-        </div>
-        {(() => {
-          const hasAppUpdate = isAppUpdateAvailable(effectiveUpdateResult?.repo);
-          if (hasAppUpdate && !updateDismissed) {
-            return (
-              <div
-                className="rounded-xl border border-[var(--accent-color,#c52b68)]/30 bg-[var(--accent-color,#c52b68)]/[0.06] p-4"
-                role="region"
-                aria-label="JaneConverter application update"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-zinc-100">
-                      JaneConverter{" "}
-                      {effectiveUpdateResult?.repo?.latest_commit
-                        ? `build ${effectiveUpdateResult.repo.latest_commit.slice(0, 7)}`
-                        : `v${effectiveUpdateResult?.repo?.latest_version}`}{" "}
-                      is available
-                    </div>
-                    <p className="mt-1 max-w-xl text-xs leading-relaxed text-zinc-400">
-                      Download and verify the update, then JaneConverter will restart to finish installing it. Your files and settings stay in place.
-                    </p>
-                    {!effectiveUpdateResult?.repo?.installer_available && (
-                      <p className="mt-2 text-xs text-amber-300">
-                        An automatic installer is not available for this package. Open the published release to update manually.
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onOpenChangesModal) onOpenChangesModal();
-                        else setShowLocalChangesModal(true);
-                      }}
-                      className="subtle-button flex items-center gap-1.5 px-3 py-2 text-xs"
-                    >
-                      <Sparkles className="size-3.5" style={{ color: "var(--accent-color, #c52b68)" }} />
-                      <span>View changes</span>
-                    </button>
-                    {effectiveUpdateResult?.repo?.installer_available ? (
-                      <button
-                        type="button"
-                        disabled={installing}
-                        onClick={() => void installUpdate()}
-                        className="primary-button flex items-center gap-2 px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
-                      >
-                        <RefreshCw className={`size-3.5 ${installing ? "animate-spin" : ""}`} />
-                        {installing ? "Installing..." : "Update now"}
-                      </button>
-                    ) : null}
-                    {effectiveUpdateResult?.repo?.release_url ? (
-                      <button
-                        type="button"
-                        onClick={() => void bridge.openUrl(effectiveUpdateResult?.repo?.release_url ?? "")}
-                        className="subtle-button flex items-center gap-2 px-3 py-2 text-xs"
-                      >
-                        <ExternalLink className="size-3.5" /> Open release
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      disabled={installing}
-                      onClick={() => {
-                        setUpdateDismissed(true);
-                        setMessage("Update dismissed. You can check again anytime.");
-                      }}
-                      className="subtle-button px-3 py-2 text-xs disabled:opacity-60"
-                    >
-                      Not now
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          return (
-            <div
-              className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.04] p-4"
-              role="region"
-              aria-label="JaneConverter update status"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-emerald-500/15 text-emerald-400">
-                    <CheckCircle2 className="size-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-zinc-100 flex items-center gap-2">
-                      <span>JaneConverter is up to date</span>
-                      <span className="font-mono text-xs text-emerald-400 font-normal">
-                        ({effectiveUpdateResult?.repo?.latest_commit
-                          ? `build ${effectiveUpdateResult.repo.latest_commit.slice(0, 7)}`
-                          : effectiveUpdateResult?.repo?.latest_version
-                            ? `v${effectiveUpdateResult.repo.latest_version}`
-                            : "latest build"})
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-zinc-400">
-                      {effectiveUpdateResult
-                        ? "Your installed build matches the latest GitHub release."
-                        : "No new updates found. Your application is running the current version."}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onOpenChangesModal) onOpenChangesModal();
-                      else setShowLocalChangesModal(true);
-                    }}
-                    className="subtle-button flex items-center gap-1.5 px-3 py-2 text-xs"
-                  >
-                    <Sparkles className="size-3.5" style={{ color: "var(--accent-color, #c52b68)" }} />
-                    <span>View changelog</span>
-                  </button>
-                  {effectiveUpdateResult?.repo?.release_url ? (
-                    <button
-                      type="button"
-                      onClick={() => void bridge.openUrl(effectiveUpdateResult.repo?.release_url ?? "")}
-                      className="subtle-button flex items-center gap-2 px-3 py-2 text-xs"
-                    >
-                      <ExternalLink className="size-3.5" /> Release notes
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {effectiveUpdateResult && (
-          <div className="grid gap-2 pt-1 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2 text-xs">
-              <div className="text-zinc-400 font-medium flex items-center justify-between">
-                <span>JaneConverter</span>
-                {effectiveUpdateResult.repo?.has_update ? (
-                  <span className="text-[10px] text-amber-400 font-normal">Update available</span>
-                ) : (
-                  <span className="text-[10px] text-emerald-400 font-normal">Up to date</span>
-                )}
-              </div>
-              <div className="mt-1 font-mono text-[11px] text-zinc-300 truncate">
-                {effectiveUpdateResult.repo?.latest_commit
-                  ? `build ${effectiveUpdateResult.repo.latest_commit.slice(0, 7)}`
-                  : effectiveUpdateResult.repo?.current_version
-                    ? `v${effectiveUpdateResult.repo.current_version}`
-                    : "Current"}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2 text-xs">
-              <div className="text-zinc-400 font-medium flex items-center justify-between">
-                <span>yt-dlp Extractor</span>
-                {effectiveUpdateResult.engine?.has_update ? (
-                  <span className="text-[10px] text-amber-400 font-normal">Update available</span>
-                ) : (
-                  <span className="text-[10px] text-emerald-400 font-normal">Up to date</span>
-                )}
-              </div>
-              <div className="mt-1 font-mono text-[11px] text-zinc-300 truncate">
-                v{effectiveUpdateResult.engine?.current_version || "bundled"}
-                {effectiveUpdateResult.engine?.has_update && ` → v${effectiveUpdateResult.engine?.latest_version}`}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2 text-xs">
-              <div className="text-zinc-400 font-medium flex items-center justify-between">
-                <span>FFmpeg Transcoder</span>
-                {effectiveUpdateResult.ffmpeg?.has_update ? (
-                  <span className="text-[10px] text-amber-400 font-normal">Update available</span>
-                ) : (
-                  <span className="text-[10px] text-emerald-400 font-normal">Up to date</span>
-                )}
-              </div>
-              <div className="mt-1 font-mono text-[11px] text-zinc-300 truncate">
-                v{effectiveUpdateResult.ffmpeg?.current_version || (runtime?.ffmpegReady ? "ready" : "not detected")}
-                {effectiveUpdateResult.ffmpeg?.has_update && ` → v${effectiveUpdateResult.ffmpeg?.latest_version}`}
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Personal Sovereign Creator Toolbox */}
-      <section className="panel space-y-3 border-l-2 border-l-[var(--accent-color,#c52b68)] p-5">
-        <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
-          <Sparkles className="size-4 text-[var(--accent-color,#d75b88)]" /> Sovereign Creator Toolbox
-        </div>
-        <p className="text-xs leading-relaxed text-zinc-300">
-          <strong className="text-white">JaneConverter is Jane Cerys&apos;s personal creator toolbox.</strong> It is explicitly not just a converter tool. It is Jane&apos;s bespoke Swiss Army knife spanning universal media ingestion, DAW project bit-level engineering (FL Studio &amp; Ableton Live), custom harmonic DSP, and local archival utilities. Jane builds whatever she needs into this suite. If it enhances your creative workflow, welcome aboard.
-        </p>
-      </section>
-
-      {/* Legal & Privacy Safeguards */}
-      <section className="panel space-y-3 p-5">
-        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
-          <ShieldCheck className="size-4 text-emerald-400" /> Legal &amp; Privacy Safeguards
-        </div>
-        <p className="text-xs leading-relaxed text-zinc-400">
-          JaneConverter is free, open-source software by <span className="text-zinc-200 font-medium">project//aspyr</span>. All conversions, audio resampling, and project patchings run 100% locally on your hardware with zero telemetry. The software complies with DMCA § 1201 and does not decrypt or circumvent DRM.
-        </p>
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <button
-            type="button"
-            onClick={() => void bridge.openUrl("https://github.com/jeongchaeul/JaneConverter/blob/main/DISCLAIMER.md")}
-            className="subtle-button flex items-center gap-1.5 px-3 py-1.5 text-xs"
-          >
-            <ExternalLink className="size-3" /> Legal Disclaimer &amp; Terms
-          </button>
-          <button
-            type="button"
-            onClick={() => void bridge.openUrl("https://github.com/jeongchaeul/JaneConverter/blob/main/SECURITY.md")}
-            className="subtle-button flex items-center gap-1.5 px-3 py-1.5 text-xs"
-          >
-            <ExternalLink className="size-3" /> Security Policy
-          </button>
-          <button
-            type="button"
-            onClick={() => void bridge.openUrl("https://github.com/jeongchaeul/JaneConverter/blob/main/packaging/THIRD-PARTY-NOTICES.md")}
-            className="subtle-button flex items-center gap-1.5 px-3 py-1.5 text-xs"
-          >
-            <ExternalLink className="size-3" /> Third-Party Notices
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
+import {
+  CheckCircle2,
+  ExternalLink,
+  HardDrive,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
+import type { RuntimeInfo } from "../../bridge";
+import { bridge } from "../../bridge";
+
+export function SettingsSystemTab({
+  runtime,
+}: {
+  runtime: RuntimeInfo | null;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+        <HardDrive className="size-3.5" style={{ color: "var(--accent-color, #c52b68)" }} />
+        System Diagnostics &amp; Runtime
+      </div>
+
+      {/* Runtime Readiness */}
+      <section className="panel p-5">
+        <div className="flex items-center gap-2 text-sm text-zinc-200">
+          <HardDrive size={16} className="text-zinc-500" /> Runtime Readiness
+        </div>
+        <div className="mt-3.5 grid gap-2 md:grid-cols-2">
+          {[
+            ["Python Engine", runtime?.pythonReady ?? true, runtime?.pythonPath || "Python 3.12 (Server)"],
+            ["FFmpeg Transcoder", runtime?.ffmpegReady ?? true, runtime?.ffmpegPath || "System FFmpeg (Web Worker)"],
+            ["Hardware Engine", true, "Cloud Container CPU"],
+            ["Storage Environment", true, "Ephemeral Web Scratch Storage"],
+          ].map(([label, ready, detail]) => (
+            <div key={String(label)} className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2.5">
+              <div className="flex items-center gap-2 text-xs text-zinc-300">
+                {ready ? (
+                  <CheckCircle2 className="size-3.5 text-emerald-400" />
+                ) : (
+                  <span className="size-3.5 rounded-full border border-amber-400/50" />
+                )}
+                {label}
+              </div>
+              <div className="mt-1 truncate font-mono text-[10px] text-zinc-500">{String(detail ?? "Checking...")}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Cloud Runtime & Continuous Auto-Updates */}
+      <section className="panel space-y-3 p-5">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+          <CheckCircle2 className="size-4 text-emerald-400" /> Continuous Auto-Updates
+        </div>
+        <p className="text-xs leading-relaxed text-zinc-400">
+          JaneConverter Web Lite is continuously maintained and automatically updated with the latest media extractors, yt-dlp signatures, and FFmpeg codecs. No manual updates or installer downloads are required.
+        </p>
+        <div className="grid gap-2 pt-1 sm:grid-cols-3">
+          <div className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2 text-xs">
+            <div className="text-zinc-400 font-medium">Max Duration</div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-400">3 Hours (10,800s)</div>
+          </div>
+          <div className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2 text-xs">
+            <div className="text-zinc-400 font-medium">Max Resolution</div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-400">1080p (FHD)</div>
+          </div>
+          <div className="rounded-xl border border-white/[0.06] bg-black/10 px-3 py-2 text-xs">
+            <div className="text-zinc-400 font-medium">Playlist Limit</div>
+            <div className="mt-1 font-mono text-[11px] text-emerald-400">50 Tracks / Batch</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Personal Sovereign Creator Toolbox */}
+      <section className="panel space-y-3 border-l-2 border-l-[var(--accent-color,#c52b68)] p-5">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
+          <Sparkles className="size-4 text-[var(--accent-color,#d75b88)]" /> Sovereign Creator Toolbox
+        </div>
+        <p className="text-xs leading-relaxed text-zinc-300">
+          <strong className="text-white">JaneConverter is Jane Cerys&apos;s personal creator toolbox.</strong> Built by and for creators, it bridges high-fidelity public media conversion, loudness normalization, and fast batch downloads with zero corporate bloat.
+        </p>
+      </section>
+
+      {/* Desktop Exclusive Capabilities Matrix */}
+      <section className="panel space-y-3 p-5 border-amber-500/20 bg-amber-500/[0.02]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-300">
+            <Sparkles className="size-4 text-amber-400" /> Desktop Application Capabilities
+          </div>
+          <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-amber-300 border border-amber-500/20">
+            Desktop Exclusive
+          </span>
+        </div>
+        <p className="text-xs leading-relaxed text-zinc-400">
+          JaneConverter Web Lite runs in a secure cloud container. The following capabilities require native operating system or hardware access and run exclusively in the <strong>JaneConverter Desktop</strong> application:
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2 pt-1 text-xs">
+          <div className="rounded-xl border border-white/[0.06] bg-black/10 p-3 space-y-1">
+            <div className="font-semibold text-zinc-200">Hardware GPU Acceleration</div>
+            <p className="text-[11px] text-zinc-400">Direct NVIDIA NVENC, AMD AMF, and Intel QSV encoding at up to 10x real-time speed.</p>
+          </div>
+          <div className="rounded-xl border border-white/[0.06] bg-black/10 p-3 space-y-1">
+            <div className="font-semibold text-zinc-200">FL Studio Project Downgrader</div>
+            <p className="text-[11px] text-zinc-400">Direct binary inspection and version patching for FL Studio (.flp) projects.</p>
+          </div>
+          <div className="rounded-xl border border-white/[0.06] bg-black/10 p-3 space-y-1">
+            <div className="font-semibold text-zinc-200">Browser Session Cookies</div>
+            <p className="text-[11px] text-zinc-400">Zero-extension session memory reading for age-gated (Error 152) and private media.</p>
+          </div>
+          <div className="rounded-xl border border-white/[0.06] bg-black/10 p-3 space-y-1">
+            <div className="font-semibold text-zinc-200">Local Folder Batch Queuing</div>
+            <p className="text-[11px] text-zinc-400">Drag massive folders directly into custom drive directories with zero web upload limits.</p>
+          </div>
+        </div>
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => void bridge.openUrl("https://github.com/jeongchaeul/JaneConverter/releases")}
+            className="subtle-button flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-200 hover:text-white"
+          >
+            <ExternalLink className="size-3" /> Get JaneConverter Desktop on GitHub
+          </button>
+        </div>
+      </section>
+
+      {/* Legal & Privacy Safeguards */}
+      <section className="panel space-y-3 p-5">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+          <ShieldCheck className="size-4 text-emerald-400" /> Legal &amp; Privacy Safeguards
+        </div>
+        <p className="text-xs leading-relaxed text-zinc-400">
+          JaneConverter Web Lite accesses only publicly available media and user-uploaded files with zero account tracking, zero telemetry, and zero cookie persistence. Ephemeral conversion artifacts are automatically purged every 10 minutes.
+        </p>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => void bridge.openUrl("https://github.com/jeongchaeul/JaneConverter/blob/main/DISCLAIMER.md")}
+            className="subtle-button flex items-center gap-1.5 px-3 py-1.5 text-xs"
+          >
+            <ExternalLink className="size-3" /> Legal Disclaimer &amp; Terms
+          </button>
+          <button
+            type="button"
+            onClick={() => void bridge.openUrl("https://github.com/jeongchaeul/JaneConverter/blob/main/SECURITY.md")}
+            className="subtle-button flex items-center gap-1.5 px-3 py-1.5 text-xs"
+          >
+            <ExternalLink className="size-3" /> Security Policy
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
