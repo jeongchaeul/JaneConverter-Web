@@ -17,13 +17,17 @@ RUN npm run build
 # Stage 2: Production Python & FFmpeg Container
 FROM python:3.12-slim AS runner
 
-# Install FFmpeg, Node.js (for yt-dlp JS challenges), and system dependencies
+# Install FFmpeg, Node.js, and system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     nodejs \
     ca-certificates \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno (yt-dlp official first-class challenge runtime)
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
 # Create standard non-root user for Hugging Face Spaces (UID 1000)
 RUN useradd -m -u 1000 appuser
