@@ -750,7 +750,7 @@ def _fetch_tiktok_direct(
 
 
 def is_youtube_gated_error(err: Any) -> bool:
-    """Checks whether an extraction exception is due to YouTube Premium / Music Premium or member gating."""
+    """Checks whether an extraction exception is due to YouTube Premium / Music Premium, bot verification, or member gating."""
     if not err:
         return False
     msg = str(err).lower()
@@ -768,6 +768,11 @@ def is_youtube_gated_error(err: Any) -> bool:
             "join this channel to get access to members-only",
             "sign in to confirm your age",
             "confirm your age",
+            "sign in to confirm you're not a bot",
+            "confirm you're not a bot",
+            "not a bot",
+            "bot detection",
+            "bot check",
         )
     )
 
@@ -1161,7 +1166,7 @@ def fetch_media_stream(
             ydl_opts["extractor_args"] = {}
         if "youtube" not in ydl_opts["extractor_args"]:
             ydl_opts["extractor_args"]["youtube"] = {
-                "player_client": ["web_embedded", "android", "ios"],
+                "player_client": ["android", "ios", "mweb", "tv_downgraded"],
             }
 
     is_tiktok_source = (
@@ -1286,7 +1291,7 @@ def fetch_media_stream(
                             if gated_title:
                                 report(
                                     0.14,
-                                    f"YouTube track is restricted to Music Premium members. Locating alternate public audio stream for '{gated_artist} - {gated_title}'...",
+                                    f"YouTube track is restricted or bot-checked. Locating alternate public audio stream for '{gated_artist} - {gated_title}'...",
                                     force=True,
                                 )
                                 recovery_candidates = build_search_candidates(gated_artist, gated_title)
@@ -1628,7 +1633,7 @@ def fetch_playlist_entries(
     if is_yt:
         ydl_opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["web_embedded", "android", "ios"],
+                "player_client": ["android", "ios", "mweb", "tv_downgraded"],
             }
         }
     try:

@@ -1142,6 +1142,18 @@ export function ConverterView({
         <button
           type="button"
           aria-pressed={false}
+          title="Media Capturer is exclusive to the JaneConverter Desktop application."
+          onClick={() => onStatus("Media Capturer is exclusive to the JaneConverter Desktop application.")}
+          className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium opacity-40 cursor-not-allowed bg-black/60 border border-white/[0.04] text-zinc-500 hover:text-zinc-500"
+        >
+          <span>Media Capturer</span>
+          <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border border-white/10 bg-white/[0.02] text-zinc-600">
+            Desktop Only
+          </span>
+        </button>
+        <button
+          type="button"
+          aria-pressed={false}
           title="Studio DAW Tools (FL Studio downgrader & DAW utilities) are exclusive to the JaneConverter Desktop application."
           onClick={() => onStatus("Studio DAW Tools are exclusive to the JaneConverter Desktop application.")}
           className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium opacity-40 cursor-not-allowed bg-black/60 border border-white/[0.04] text-zinc-500 hover:text-zinc-500"

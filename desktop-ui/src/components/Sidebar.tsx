@@ -1,4 +1,4 @@
-import { Activity, BookOpen, FileAudio, FolderOpen, PanelLeftClose, PanelLeftOpen, Settings2 } from "lucide-react";
+import { Activity, BookOpen, FileAudio, FolderOpen, PanelLeftClose, PanelLeftOpen, Radio, Settings2, Sliders } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { hexToRgba } from "../utils/appearanceStorage";
@@ -109,6 +109,47 @@ export function Sidebar({
             </button>
           );
         })}
+        {/* Desktop Application Exclusive Features */}
+        <div className="pt-2 space-y-1">
+          <button
+            type="button"
+            disabled
+            title="Media Capturer is exclusive to the JaneConverter Desktop application."
+            className={[
+              "group relative flex w-full items-center rounded-xl py-2 text-left text-xs opacity-40 cursor-not-allowed bg-black/40 border border-white/[0.03] text-zinc-500",
+              collapsed ? "justify-center px-2" : "justify-between px-3",
+            ].join(" ")}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Radio className="size-4 text-zinc-500 shrink-0" strokeWidth={1.8} />
+              {!collapsed && <span className="truncate">Media Capturer</span>}
+            </div>
+            {!collapsed && (
+              <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border border-white/10 bg-white/[0.02] text-zinc-600">
+                Desktop
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            disabled
+            title="Studio DAW Tools (FL Studio downgrader & DAW utilities) are exclusive to the JaneConverter Desktop application."
+            className={[
+              "group relative flex w-full items-center rounded-xl py-2 text-left text-xs opacity-40 cursor-not-allowed bg-black/40 border border-white/[0.03] text-zinc-500",
+              collapsed ? "justify-center px-2" : "justify-between px-3",
+            ].join(" ")}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Sliders className="size-4 text-zinc-500 shrink-0" strokeWidth={1.8} />
+              {!collapsed && <span className="truncate">Studio DAW</span>}
+            </div>
+            {!collapsed && (
+              <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider border border-white/10 bg-white/[0.02] text-zinc-600">
+                Desktop
+              </span>
+            )}
+          </button>
+        </div>
       </nav>
 
       {/* Workspace Note */}

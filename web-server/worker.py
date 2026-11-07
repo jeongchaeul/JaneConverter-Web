@@ -389,4 +389,5 @@ class JobManager:
                     del self.uploads[uid]
 
 
-manager = JobManager(max_concurrent=2)
+max_jobs = int(os.environ.get("CONCURRENT_JOBS", "1"))
+manager = JobManager(max_concurrent=max_jobs)
