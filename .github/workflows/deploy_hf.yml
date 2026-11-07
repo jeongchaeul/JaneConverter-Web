@@ -8,22 +8,21 @@ on:
 jobs:
   sync-to-huggingface:
     runs-on: ubuntu-latest
-    if: env.HF_TOKEN != ''
-    env:
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME || 'janeconverter-web' }}
     steps:
       - name: Checkout code
+        if: ${{ secrets.HF_TOKEN != '' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: true
 
       - name: Push to Hugging Face Space
+        if: ${{ secrets.HF_TOKEN != '' }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME || 'janeconverter-web' }}
         run: |
-          if [ -n "$HF_TOKEN" ]; then
-            git config --global user.email "bot@janeconverter.local"
-            git config --global user.name "JaneConverter CI"
-            git remote add hf "https://user:$HF_TOKEN@huggingface.co/spaces/${{ secrets.HF_USERNAME || github.repository_owner }}/$HF_SPACE_NAME"
-            git push --force hf main
-          fi
+          git config --global user.email "bot@janeconverter.local"
+          git config --global user.name "JaneConverter CI"
+          git remote add hf "https://user:$HF_TOKEN@huggingface.co/spaces/${{ secrets.HF_USERNAME || github.repository_owner }}/$HF_SPACE_NAME"
+          git push --force hf main
