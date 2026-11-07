@@ -43,6 +43,8 @@ class Job:
         self.progress = 0.0
         self.step = "Job queued..."
         self.filename: Optional[str] = None
+        self.title: Optional[str] = None
+        self.thumbnail: Optional[str] = None
         self.output_path: Optional[str] = None
         self.error: Optional[str] = None
         self.created_at = time.time()
@@ -61,6 +63,8 @@ class Job:
             progress=self.progress,
             step=self.step,
             filename=self.filename,
+            title=self.title,
+            thumbnail=self.thumbnail,
             download_url=download_url,
             error=self.error,
             created_at=self.created_at,
@@ -225,6 +229,13 @@ class JobManager:
             source_input = extracted_meta["media_path"]
         else:
             raise ValueError("No source URL or uploaded file provided.")
+
+        job.title = extracted_meta.get("title") or "Converted media"
+        job.thumbnail = extracted_meta.get("thumbnail_url") or extracted_meta.get("thumbnail") or ""
+        if job.thumbnail:
+            job.emit_progress(job.progress, f"[*] Media Thumbnail URL: {job.thumbnail}")
+        if job.title:
+            job.emit_progress(job.progress, f"[*] Conversion: {job.title}")
 
         if job.abort_event.is_set():
             job.status = JobState.CANCELLED

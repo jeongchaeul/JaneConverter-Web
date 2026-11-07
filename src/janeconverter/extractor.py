@@ -1312,19 +1312,35 @@ def fetch_media_stream(
                                 except Exception:
                                     pass
                             if gated_title:
+                                clean_artist = gated_artist
+                                clean_title = gated_title
+                                if gated_title and (" - " in gated_title or " – " in gated_title or " — " in gated_title):
+                                    parts = re.split(r'\s*[-–—]\s*', gated_title, maxsplit=1)
+                                    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                                        clean_artist = parts[0].strip()
+                                        clean_title = parts[1].strip()
+
                                 report(
                                     0.14,
-                                    f"YouTube track is restricted or bot-checked. Locating alternate public audio stream for '{gated_artist} - {gated_title}'...",
+                                    f"YouTube track is restricted or bot-checked. Locating alternate public audio stream for '{clean_artist} - {clean_title}'...",
                                     force=True,
                                 )
-                                recovery_candidates = build_search_candidates(gated_artist, gated_title)
+                                recovery_candidates = build_search_candidates(clean_artist, clean_title)
+                                if gated_artist and gated_artist != "Unknown Artist" and gated_artist.lower() != clean_artist.lower():
+                                    alt_candidates = build_search_candidates(gated_artist, gated_title)
+                                    recovery_candidates.extend([c for c in alt_candidates if c not in recovery_candidates])
+
+                                raw_title_sc = f"scsearch5:{gated_title}"
+                                if raw_title_sc not in recovery_candidates:
+                                    recovery_candidates.append(raw_title_sc)
+
                                 # Prioritize SoundCloud over YouTube when YouTube has bot-blocked the server IP
                                 sc_cands = [c for c in recovery_candidates if c.startswith("scsearch")]
                                 other_cands = [c for c in recovery_candidates if not c.startswith("scsearch")]
                                 recovery_candidates = sc_cands + other_cands
                                 catalog_meta = {
-                                    "title": gated_title,
-                                    "artist": gated_artist,
+                                    "title": clean_title,
+                                    "artist": clean_artist,
                                     "album": "",
                                     "year": "",
                                     "duration": gated_duration,

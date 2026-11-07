@@ -45,6 +45,8 @@ class JobResponse(BaseModel):
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     step: str = ""
     filename: Optional[str] = None
+    title: Optional[str] = None
+    thumbnail: Optional[str] = None
     download_url: Optional[str] = None
     error: Optional[str] = None
     duration: Optional[float] = None

@@ -4,7 +4,7 @@ function isAppUpdateAvailable(repoUpdate?: { has_update?: boolean } | null): boo
 }
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { AlertCircle, CheckCircle2, Clock, FolderOpen, GripVertical, HardDrive, Play, RotateCcw, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Download, FolderOpen, GripVertical, HardDrive, Play, RotateCcw, X } from "lucide-react";
 import { bridge, type AccessStatus, type ConversionHistoryItem, type ConverterEvent, type ConverterSettings, type FetchedMedia, type RuntimeInfo, type UpdateCheckResult } from "./bridge";
 import { Sidebar, type ViewKey } from "./components/Sidebar";
 import { ConverterView } from "./components/ConverterView";
@@ -150,6 +150,7 @@ interface SuccessPromptState {
   formatLabel: string;
   qualityLabel: string;
   exportPath: string;
+  downloadUrl?: string;
   elapsedMs: number;
   fallbackNote: string | null;
   fileSizeBytes?: number;
@@ -596,7 +597,13 @@ export default function App() {
             ? event.message || "Partial conversion: some media items failed to convert."
             : detectFallbackNote(ctx?.logs ?? [], ctx?.forcedVideoFallback ?? false, ctx?.forcedAudioFallback ?? false);
           const { formatLabel, qualityLabel } = describeOutputFormatAndQuality(effective, exportPath, fallbackNote);
-          const fileName = baseNameFromPath(exportPath) || baseNameFromPath(ctx?.source || "") || "Converted media";
+          let fileName = (event.output && !event.output.includes("/")) ? event.output : baseNameFromPath(exportPath);
+          if (!fileName || fileName.toLowerCase() === "download" || fileName.toLowerCase() === "out") {
+            fileName = baseNameFromPath(ctx?.source || "") || "Converted media";
+          }
+          const downloadUrl = (event.output && event.output.startsWith("/api/"))
+            ? event.output
+            : (event.jobId ? `/api/v1/jobs/${event.jobId}/download` : undefined);
           setFailure(null);
           const historyId = `${event.jobId}-${Date.now()}`;
           const historyItem: ConversionHistoryItem = {
@@ -619,6 +626,7 @@ export default function App() {
               formatLabel,
               qualityLabel,
               exportPath,
+              downloadUrl,
               elapsedMs,
               fallbackNote,
               status: isPartial ? "partial" : "succeeded",
@@ -1206,22 +1214,34 @@ export default function App() {
                   {success.fallbackNote}
                 </div>
               )}
-              <div
-                draggable
-                onDragStartCapture={(e) => dragExportedFile(e, success.exportPath)}
-                title="Drag this file into another app (e.g. FL Studio, Explorer, Discord)"
-                className="group relative cursor-grab active:cursor-grabbing rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 transition-colors hover:border-pink-500/30 hover:bg-white/[0.05]"
-              >
-                <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-zinc-500">
-                  <span>Exported to</span>
-                  <span className="flex items-center gap-1 font-mono text-[10px] text-zinc-500 group-hover:text-pink-400 transition-colors">
-                    <GripVertical className="size-3" /> Draggable
-                  </span>
+              {runtime?.mode === "browser" ? (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3.5 text-xs leading-relaxed text-zinc-300">
+                  <div className="flex items-center gap-2 font-medium text-emerald-300">
+                    <CheckCircle2 className="size-4 shrink-0 text-emerald-400" />
+                    <span>Conversion complete</span>
+                  </div>
+                  <p className="mt-1 text-zinc-400">
+                    Your converted media has been downloaded to your browser's default downloads folder.
+                  </p>
                 </div>
-                <div className="mt-1 break-all font-mono text-xs text-zinc-300">
-                  {success.exportPath}
+              ) : (
+                <div
+                  draggable
+                  onDragStartCapture={(e) => dragExportedFile(e, success.exportPath)}
+                  title="Drag this file into another app (e.g. FL Studio, Explorer, Discord)"
+                  className="group relative cursor-grab active:cursor-grabbing rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 transition-colors hover:border-pink-500/30 hover:bg-white/[0.05]"
+                >
+                  <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-zinc-500">
+                    <span>Exported to</span>
+                    <span className="flex items-center gap-1 font-mono text-[10px] text-zinc-500 group-hover:text-pink-400 transition-colors">
+                      <GripVertical className="size-3" /> Draggable
+                    </span>
+                  </div>
+                  <div className="mt-1 break-all font-mono text-xs text-zinc-300">
+                    {success.exportPath}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -1237,40 +1257,65 @@ export default function App() {
                 >
                   <RotateCcw className="size-4 text-pink-400" />
                 </button>
-                <button
-                  type="button"
-                  draggable
-                  onDragStartCapture={(e) => dragExportedFile(e, success.exportPath)}
-                  onClick={() => statusMessage("Drag this button or the exported card directly into another app (e.g. FL Studio).")}
-                  className="subtle-button grid size-9 place-items-center cursor-grab active:cursor-grabbing hover:border-pink-500/40"
-                  title="Drag this file into another app (e.g. FL Studio, Explorer, Discord)"
-                  aria-label="Drag this file into another app"
-                >
-                  <GripVertical className="size-4 text-pink-400" />
-                </button>
+                {runtime?.mode !== "browser" && (
+                  <button
+                    type="button"
+                    draggable
+                    onDragStartCapture={(e) => dragExportedFile(e, success.exportPath)}
+                    onClick={() => statusMessage("Drag this button or the exported card directly into another app (e.g. FL Studio).")}
+                    className="subtle-button grid size-9 place-items-center cursor-grab active:cursor-grabbing hover:border-pink-500/40"
+                    title="Drag this file into another app (e.g. FL Studio, Explorer, Discord)"
+                    aria-label="Drag this file into another app"
+                  >
+                    <GripVertical className="size-4 text-pink-400" />
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void bridge.openFile(success.exportPath).catch((error) => statusMessage(error instanceof Error ? error.message : String(error)))}
-                  className="primary-button flex items-center gap-1.5 px-3 py-2 text-xs"
-                >
-                  <Play className="size-3.5" /> Open File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void bridge.openPath(success.exportPath).catch((error) => statusMessage(error instanceof Error ? error.message : String(error)))}
-                  className="subtle-button flex items-center gap-1.5 px-3 py-2 text-xs"
-                >
-                  <FolderOpen className="size-3.5" /> Open Path
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSuccess(null)}
-                  className="subtle-button px-3 py-2 text-xs"
-                >
-                  Close
-                </button>
+                {runtime?.mode === "browser" ? (
+                  <>
+                    {success.downloadUrl && (
+                      <a
+                        href={success.downloadUrl}
+                        download={success.fileName}
+                        className="primary-button flex items-center gap-1.5 px-3 py-2 text-xs"
+                      >
+                        <Download className="size-3.5" /> Download again
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSuccess(null)}
+                      className="subtle-button px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void bridge.openFile(success.exportPath).catch((error) => statusMessage(error instanceof Error ? error.message : String(error)))}
+                      className="primary-button flex items-center gap-1.5 px-3 py-2 text-xs"
+                    >
+                      <Play className="size-3.5" /> Open File
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void bridge.openPath(success.exportPath).catch((error) => statusMessage(error instanceof Error ? error.message : String(error)))}
+                      className="subtle-button flex items-center gap-1.5 px-3 py-2 text-xs"
+                    >
+                      <FolderOpen className="size-3.5" /> Open Path
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSuccess(null)}
+                      className="subtle-button px-3 py-2 text-xs"
+                    >
+                      Close
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </section>

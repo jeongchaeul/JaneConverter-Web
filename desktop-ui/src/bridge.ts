@@ -573,12 +573,33 @@ export const webBridge: JaneBridge = {
           cancelled: "cancelled",
         };
         const kind: EventKind = statusMap[jobData.status] || "status";
+        if (jobData.thumbnail) {
+          eventListeners.forEach((fn) =>
+            fn({
+              jobId,
+              kind: "status",
+              progress: typeof jobData.progress === "number" ? Math.max(0, Math.min(1, jobData.progress)) : 0,
+              message: `[*] Media Thumbnail URL: ${jobData.thumbnail}`,
+            })
+          );
+        }
+        if (jobData.title) {
+          eventListeners.forEach((fn) =>
+            fn({
+              jobId,
+              kind: "status",
+              progress: typeof jobData.progress === "number" ? Math.max(0, Math.min(1, jobData.progress)) : 0,
+              message: `[*] Conversion: ${jobData.title}`,
+            })
+          );
+        }
+
         const evt: ConverterEvent = {
           jobId,
           kind,
           progress: typeof jobData.progress === "number" ? Math.max(0, Math.min(1, jobData.progress)) : 0,
           message: jobData.step,
-          output: jobData.download_url || jobData.filename || undefined,
+          output: jobData.filename || jobData.title || jobData.download_url || undefined,
         };
         eventListeners.forEach((fn) => fn(evt));
 
@@ -614,12 +635,33 @@ export const webBridge: JaneBridge = {
           cancelled: "cancelled",
         };
         const kind: EventKind = statusMap[data.status] || "status";
+        if (data.thumbnail) {
+          eventListeners.forEach((fn) =>
+            fn({
+              jobId,
+              kind: "status",
+              progress: typeof data.progress === "number" ? Math.max(0, Math.min(1, data.progress)) : 0,
+              message: `[*] Media Thumbnail URL: ${data.thumbnail}`,
+            })
+          );
+        }
+        if (data.title) {
+          eventListeners.forEach((fn) =>
+            fn({
+              jobId,
+              kind: "status",
+              progress: typeof data.progress === "number" ? Math.max(0, Math.min(1, data.progress)) : 0,
+              message: `[*] Conversion: ${data.title}`,
+            })
+          );
+        }
+
         const evt: ConverterEvent = {
           jobId,
           kind,
           progress: typeof data.progress === "number" ? Math.max(0, Math.min(1, data.progress)) : 0,
           message: data.step,
-          output: data.download_url || data.filename || undefined,
+          output: data.filename || data.title || data.download_url || undefined,
         };
 
         eventListeners.forEach((fn) => fn(evt));

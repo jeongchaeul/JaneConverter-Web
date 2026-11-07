@@ -258,3 +258,30 @@ def test_sniffer_blocks_ssrf_to_private_and_loopback_hosts(tmp_path):
     with pytest.raises(ValueError, match="private, loopback, or unsafe"):
         download_sniffed_asset(loopback_asset, str(tmp_path))
 
+
+
+def test_sniff_webpage_extracts_iso_duration():
+    html = """
+    <html>
+    <head>
+        <title>Test Video</title>
+        <meta property="video:duration" content="1234">
+    </head>
+    <body>
+        <script>
+            var playerConfig = {
+                "file": "https://streams.example.com/vod/video.m3u8",
+                "duration": "PT00H36M17S"
+            };
+        </script>
+    </body>
+    </html>
+    """
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = html
+    mock_resp.url = "https://example.com/video"
+    with patch("requests.Session.get", return_value=mock_resp):
+        asset = sniff_webpage("https://example.com/video")
+        assert asset is not None
+        assert asset.duration == 2177.0

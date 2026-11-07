@@ -74,6 +74,7 @@ class SniffedAsset:
     source_page: str
     headers: Dict[str, str]
     thumbnail_url: str = ""
+    duration: float = 0.0
 
 
 def _clean_title(raw: str) -> str:
@@ -401,6 +402,23 @@ def sniff_webpage(
 
     headers = {"User-Agent": _DEFAULT_HEADERS["User-Agent"], "Referer": effective_url}
 
+    # Extract duration
+    duration = 0.0
+    m_iso = re.search(r"""duration["']?\s*:\s*["']PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?["']""", html_content, re.IGNORECASE)
+    if m_iso:
+        h = int(m_iso.group(1) or 0)
+        m = int(m_iso.group(2) or 0)
+        s = int(m_iso.group(3) or 0)
+        duration = float(h * 3600 + m * 60 + s)
+    if duration <= 0:
+        m_dur = re.search(r"""<meta[^>]+(?:property|name)=["']video:duration["'][^>]+content=["'](\d+)["']""", html_content, re.IGNORECASE)
+        if m_dur:
+            duration = float(m_dur.group(1))
+    if duration <= 0:
+        m_sec = re.search(r"""["'](?:video_)?duration["']\s*:\s*(\d+)""", html_content, re.IGNORECASE)
+        if m_sec:
+            duration = float(m_sec.group(1))
+
     # 1. Look for HLS / DASH stream manifests
     stream_url = _find_stream_in_html(html_content, effective_url)
     if stream_url:
@@ -415,6 +433,7 @@ def sniff_webpage(
             source_page=effective_url,
             headers=headers,
             thumbnail_url=thumb_url,
+            duration=duration,
         )
 
     # 2. Look for 3D model assets
@@ -565,14 +584,80 @@ def download_sniffed_asset(
             "-headers", header_lines,
             "-i", asset.asset_url,
             "-c", "copy",
+            "-progress", "pipe:1",
+            "-nostats",
             "-threads", "0",
             output_file,
         ]
 
         report(0.55, "Remuxing high-definition media stream to MP4...")
-        returncode, _, err_msg = run_subprocess_binary(cmd, capture_output=True)
+        import subprocess
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            creationflags=creationflags,
+        )
 
-        if returncode != 0 or not os.path.isfile(output_file) or os.path.getsize(output_file) == 0:
+        last_report_time = time.time()
+        err_lines = []
+
+        def read_stderr():
+            try:
+                for err_line in proc.stderr:
+                    if err_line:
+                        err_lines.append(err_line.strip())
+            except Exception:
+                pass
+
+        err_thread = threading.Thread(target=read_stderr, daemon=True)
+        err_thread.start()
+
+        remux_ok = False
+        try:
+            for out_line in proc.stdout:
+                if abort_event and abort_event.is_set():
+                    proc.kill()
+                    raise RuntimeError("Conversion cancelled by user.")
+                out_line = out_line.strip()
+                if out_line.startswith("out_time="):
+                    time_part = out_line.split("=", 1)[1].strip()
+                    m_pts = re.match(r'(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)', time_part)
+                    cur_sec = 0.0
+                    if m_pts:
+                        h = float(m_pts.group(1) or 0)
+                        m = float(m_pts.group(2) or 0)
+                        s = float(m_pts.group(3) or 0)
+                        cur_sec = h * 3600 + m * 60 + s
+
+                    now = time.time()
+                    if now - last_report_time >= 0.8:
+                        last_report_time = now
+                        if asset.duration > 0:
+                            frac = min(1.0, max(0.0, cur_sec / asset.duration))
+                            pct = 0.55 + (frac * 0.30)
+                            m_cur, s_cur = divmod(int(cur_sec), 60)
+                            m_tot, s_tot = divmod(int(asset.duration), 60)
+                            report(pct, f"Remuxing HD stream: {m_cur:02d}:{s_cur:02d} / {m_tot:02d}:{s_tot:02d} ({int(frac * 100)}%)...")
+                        else:
+                            m_cur, s_cur = divmod(int(cur_sec), 60)
+                            report(0.65, f"Remuxing HD stream: {m_cur:02d}:{s_cur:02d} captured...")
+            proc.wait()
+            remux_ok = (proc.returncode == 0 and os.path.isfile(output_file) and os.path.getsize(output_file) > 0)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            raise
+        finally:
+            err_thread.join(timeout=1.0)
+
+        if not remux_ok:
+            err_msg = " ".join(err_lines)
             # Try yt-dlp fallback for streams with complex authentication
             report(0.60, "FFmpeg direct remux failed; engaging multi-threaded stream pipeline...")
             import yt_dlp
@@ -606,7 +691,7 @@ def download_sniffed_asset(
             "webpage_url": asset.source_page,
             "thumbnail_url": asset.thumbnail_url,
             "thumbnail_path": None,
-            "duration": 0,
+            "duration": asset.duration,
             "source_type": "stream",
             "is_local": False,
         }

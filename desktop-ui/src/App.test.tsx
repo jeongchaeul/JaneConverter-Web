@@ -87,6 +87,18 @@ describe("Application shell", () => {
 
   it("shows the Success modal with file details, fallback note, elapsed time, and Open File / Open Path / Close actions", async () => {
     let deliverEvent: ((event: ConverterEvent) => void) | undefined;
+    vi.spyOn(bridge, "runtimeInfo").mockResolvedValue({
+      mode: "tauri",
+      pythonReady: true,
+      ffmpegReady: true,
+      ffmpegPath: "ffmpeg",
+      pythonPath: "python",
+      dataRoot: "D:\\JaneConverter",
+      projectRoot: "D:\\JaneConverter",
+      gpuAvailable: false,
+      gpuLabel: "CPU",
+      packaged: true,
+    });
     vi.spyOn(bridge, "settingsGet").mockResolvedValue({
       outputDir: "D:\\JaneConverter\\converted", fetchedDir: "fetched", category: "Image", format: "source",
       bitrate: "best", sampleRate: 48000, resolution: "original", normalize: false,
@@ -250,4 +262,73 @@ describe("Application shell", () => {
     await act(async () => { root.unmount(); });
     container.remove();
   });
+  it("shows the Web Success modal without desktop file actions and with download confirmation", async () => {
+    let deliverEvent: ((event: ConverterEvent) => void) | undefined;
+    vi.spyOn(bridge, "runtimeInfo").mockResolvedValue({
+      mode: "browser",
+      pythonReady: true,
+      ffmpegReady: true,
+      ffmpegPath: "System FFmpeg (Web Worker)",
+      pythonPath: "Python 3.12 (Server)",
+      dataRoot: "Web Storage",
+      projectRoot: "Web Server",
+      gpuAvailable: false,
+      gpuLabel: "Cloud CPU (Web Lite)",
+      packaged: true,
+    });
+    vi.spyOn(bridge, "settingsGet").mockResolvedValue({
+      outputDir: "converted", fetchedDir: "fetched", category: "Music", format: "mp3",
+      bitrate: "320k", sampleRate: 48000, resolution: "original", normalize: false,
+      useGpu: false, saveCover: true, saveMetadata: true, retries: 2,
+    });
+    vi.spyOn(bridge, "subscribe").mockImplementation(async (listener) => {
+      deliverEvent = listener;
+      return () => {};
+    });
+    vi.spyOn(bridge, "startConversion").mockResolvedValue("job-web-success");
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => { root.render(<App />); });
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Source media URL or local path"]');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "https://youtu.be/BThCK0HF1Dw");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const convert = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Convert media"));
+    await act(async () => { convert?.click(); await Promise.resolve(); });
+    await act(async () => {
+      deliverEvent?.({
+        jobId: "job-web-success",
+        kind: "started",
+        message: "Starting conversion...",
+      });
+      deliverEvent?.({
+        jobId: "job-web-success",
+        kind: "finished",
+        message: "Conversion complete! Ready to download.",
+        output: "2hollis - Warhorse.mp3",
+      });
+    });
+
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain("Success");
+    expect(dialog?.textContent).toContain("2hollis - Warhorse.mp3");
+    expect(dialog?.textContent).toContain("Conversion complete");
+    expect(dialog?.textContent).toContain("Your converted media has been downloaded to your browser's default downloads folder.");
+    expect(dialog?.textContent).not.toContain("Open File");
+    expect(dialog?.textContent).not.toContain("Open Path");
+    expect(dialog?.textContent).not.toContain("Draggable");
+
+    const downloadAgainLink = dialog?.querySelector('a[download="2hollis - Warhorse.mp3"]');
+    expect(downloadAgainLink).not.toBeNull();
+    expect(downloadAgainLink?.getAttribute("href")).toBe("/api/v1/jobs/job-web-success/download");
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+  });
+
 });
