@@ -1166,7 +1166,7 @@ def fetch_media_stream(
             ydl_opts["extractor_args"] = {}
         if "youtube" not in ydl_opts["extractor_args"]:
             ydl_opts["extractor_args"]["youtube"] = {
-                "player_client": ["android", "ios", "mweb", "tv_downgraded"],
+                "player_client": ["visionos", "android_vr", "android", "ios", "mweb"],
             }
 
     is_tiktok_source = (
@@ -1635,7 +1635,7 @@ def fetch_playlist_entries(
     if is_yt:
         ydl_opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["android", "ios", "mweb", "tv_downgraded"],
+                "player_client": ["visionos", "android_vr", "android", "ios", "mweb"],
             }
         }
     try:
