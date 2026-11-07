@@ -23,18 +23,20 @@ from .paths import get_ytdlp_cache_dir
 from .session_pacer import pace_request
 from .catalog_match import choose_catalog_match, match_score
 from .extraction_recovery import classify_extraction, ExtractionCategory
-from .browser_session_fallback import extract_with_browser_fallback, BrowserSessionError
-from .auth import (
-    describe_authenticated_extraction_failure,
-    normalize_browser_session,
-    normalize_browser_error_message,
-)
+from .extraction_recovery import extract_with_recovery
 from .converter import get_js_runtimes_config
-from .instagram_patch import patch_instagram_story_extractor
-from .facebook_patch import patch_facebook_story_extractor
 
-patch_instagram_story_extractor()
-patch_facebook_story_extractor()
+class BrowserSessionError(RuntimeError):
+    pass
+
+def normalize_browser_session(session):
+    return "none"
+
+def normalize_browser_error_message(msg):
+    return str(msg)
+
+def describe_authenticated_extraction_failure(error, browser=None):
+    return str(error)
 
 
 class _AuthenticatedYtdlpLogger:
@@ -902,9 +904,9 @@ def fetch_media_stream(
     raw_browser = str(auth_browser or "").strip().lower()
     allow_browser_cookies = raw_browser not in ("none", "disabled", "off", "false", "public", "public only")
     if not allow_browser_cookies:
-        effective_auth_browser = "none"
+        _ = (auth_browser, allow_browser_cookies)
     else:
-        effective_auth_browser = normalize_browser_session(auth_browser) or "auto"
+        _ = normalize_browser_session(auth_browser) or "auto"
 
     last_report_time = [0.0]
 
@@ -1220,7 +1222,7 @@ def fetch_media_stream(
     try:
         info = None
         last_error = None
-        archival_attempted = False
+        # archival disabled
         catalog_meta = spotify_meta or apple_meta
         recovery_deadline = time.monotonic() + 60
         if is_url(source):
@@ -1252,10 +1254,9 @@ def fetch_media_stream(
                 if extract_flat and isinstance(params, dict):
                     params["extract_flat"] = True
                 try:
-                    return extract_with_browser_fallback(
-                        ydl, ydl_opts, query, download, browser=effective_auth_browser,
+                    return extract_with_recovery(
+                        ydl, query, download,
                         abort_event=abort_event, report=report, deadline=recovery_deadline,
-                        allow_cookies=allow_browser_cookies,
                     )
                 finally:
                     if isinstance(params, dict):
@@ -1386,14 +1387,6 @@ def fetch_media_stream(
                     except Exception:
                         if abort_event and abort_event.is_set():
                             raise
-                if archival_fallback and not archival_attempted:
-                    archival_attempted = True
-                    from .archival import probe_archival_vaults, download_archival_stream
-                    arc_res = probe_archival_vaults(source, report=report)
-                    if arc_res and arc_res.found:
-                        return download_archival_stream(
-                            arc_res, output_dir, abort_event=abort_event, progress_callback=progress_callback
-                        )
                 if source_type == "apple_music":
                     msg = (
                         "Apple Music was recognized, but no matching downloadable public stream was found. "
@@ -1523,14 +1516,6 @@ def fetch_media_stream(
                 report=report,
                 preexisting_stream_files=preexisting_stream_files,
             )
-        if archival_fallback and not archival_attempted:
-            archival_attempted = True
-            from .archival import probe_archival_vaults, download_archival_stream
-            arc_res = probe_archival_vaults(source, report=report)
-            if arc_res and arc_res.found:
-                return download_archival_stream(
-                    arc_res, output_dir, abort_event=abort_event, progress_callback=progress_callback
-                )
         raise
     except Exception as e:
         if is_tiktok_source:
@@ -1547,14 +1532,6 @@ def fetch_media_stream(
                 )
             except Exception as direct_err:
                 raise RuntimeError(f"Stream extraction failed: {str(e)} (Direct extractor: {direct_err})") from e
-        if archival_fallback and not archival_attempted:
-            archival_attempted = True
-            from .archival import probe_archival_vaults, download_archival_stream
-            arc_res = probe_archival_vaults(source, report=report)
-            if arc_res and arc_res.found:
-                return download_archival_stream(
-                    arc_res, output_dir, abort_event=abort_event, progress_callback=progress_callback
-                )
         if auth_browser and isinstance(e, BrowserSessionError):
             raise RuntimeError(describe_authenticated_extraction_failure(auth_browser, e)) from e
         raise RuntimeError(f"Stream extraction failed: {str(e)}") from e
@@ -1586,9 +1563,9 @@ def fetch_playlist_entries(
     raw_browser = str(auth_browser or "").strip().lower()
     allow_browser_cookies = raw_browser not in ("none", "disabled", "off", "false", "public", "public only")
     if not allow_browser_cookies:
-        effective_auth_browser = "none"
+        _ = (auth_browser, allow_browser_cookies)
     else:
-        effective_auth_browser = normalize_browser_session(auth_browser) or "auto"
+        _ = normalize_browser_session(auth_browser) or "auto"
 
 
     if source_type == "apple_music":
@@ -1698,9 +1675,9 @@ def fetch_playlist_entries(
             pace_request(clean_url)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             report(0.3, "Extracting playlist index and track listings...")
-            info = extract_with_browser_fallback(
-                ydl, ydl_opts, clean_url, download=False, browser=effective_auth_browser,
-                report=report, allow_cookies=allow_browser_cookies,
+            info = extract_with_recovery(
+                ydl, clean_url, download=False,
+                report=report,
             )
             if not info:
                 raise ValueError("Could not extract playlist information from URL.")
@@ -1725,33 +1702,7 @@ def fetch_playlist_entries(
                 } or e.get("availability") in ("private", "deleted", "unavailable", "needs_auth")
 
                 if is_unavailable:
-                    if not archival_fallback:
-                        continue
-                    # Archival fallback active: retain item and resolve historical metadata
-                    e_id = e.get("id") or ""
-                    if not e_id:
-                        continue
-                    from .archival import lookup_historical_metadata
-                    hist_meta = lookup_historical_metadata(e_id)
-                    t_title = hist_meta.title or f"[Archived Video] {e_id}"
-                    t_artist = hist_meta.uploader or e.get("uploader") or e.get("channel") or "Archived Vault"
-                    t_dur_sec = hist_meta.duration or int(e.get("duration") or 0)
-                    e_url = f"https://www.youtube.com/watch?v={e_id}"
-                    e_thumb = hist_meta.thumbnail_url or playlist_cover
-                    e_desc = hist_meta.description or "Unavailable on YouTube. Queued for Archival Vault recovery."
-                    entries.append({
-                        "index": valid_idx,
-                        "title": t_title,
-                        "artist": t_artist,
-                        "duration": t_dur_sec,
-                        "duration_str": format_duration(t_dur_sec),
-                        "url": e_url,
-                        "id": e_id,
-                        "thumbnail": e_thumb,
-                        "description": e_desc,
-                        "album": playlist_title,
-                        "is_archival_candidate": True,
-                    })
+                    continue
                     valid_idx += 1
                     continue
 

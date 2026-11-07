@@ -42,32 +42,59 @@ from .converter import (
     sanitize_time_offset,
     parse_time_offset_seconds,
 )
-from .updater import (
-    check_for_engine_updates,
-    check_for_ffmpeg_updates,
-    check_for_repo_updates,
-)
 from .version import __version__
 from .paths import DEFAULT_CONVERTED_DIR, DEFAULT_TEMP_DIR, initialize_app_data
-from .auth import normalize_browser_session
-from .browser_session_fallback import BrowserSessionError
 from .extraction_recovery import classify_extraction, ExtractionCategory, humanize_extraction_error
-from .facebook_capture import (
-    download_facebook_photo_manifest,
-    is_facebook_post_url,
-    fetch_facebook_manifest,
-)
-from .social_photo_capture import (
-    MEDIA_HOSTS as SOCIAL_PHOTO_MEDIA_HOSTS,
-    download_social_photo_manifest,
-    is_pinterest_newshub_url,
-    is_pinterest_collection_url,
-    is_pinterest_pin_url,
-    fetch_pinterest_collection_manifest,
-    is_instagram_post_url,
-    fetch_instagram_manifest,
-)
-from .hardware_snapshot import get_hardware_snapshot
+
+class BrowserSessionError(RuntimeError):
+    pass
+
+def normalize_browser_session(session):
+    return "none"
+
+def get_hardware_snapshot():
+    return {"gpus": [], "cpu": "CPU", "ram": "N/A"}
+
+def check_for_engine_updates():
+    return {"has_update": False, "version": __version__}
+
+def check_for_ffmpeg_updates():
+    return {"has_update": False}
+
+def check_for_repo_updates():
+    return {"has_update": False}
+
+def download_facebook_photo_manifest(*args, **kwargs):
+    raise NotImplementedError("Facebook photo album capture is Desktop-only.")
+
+def is_facebook_post_url(*args, **kwargs):
+    return False
+
+def fetch_facebook_manifest(*args, **kwargs):
+    return None
+
+SOCIAL_PHOTO_MEDIA_HOSTS = ()
+
+def download_social_photo_manifest(*args, **kwargs):
+    raise NotImplementedError("Social photo capture is Desktop-only.")
+
+def is_pinterest_newshub_url(*args, **kwargs):
+    return False
+
+def is_pinterest_collection_url(*args, **kwargs):
+    return False
+
+def is_pinterest_pin_url(*args, **kwargs):
+    return False
+
+def fetch_pinterest_collection_manifest(*args, **kwargs):
+    return None
+
+def is_instagram_post_url(*args, **kwargs):
+    return False
+
+def fetch_instagram_manifest(*args, **kwargs):
+    return None
 
 MIN_FREE_DISK_BYTES = 256 * 1024 * 1024  # keep a reasonable minimum without rejecting small conversions
 

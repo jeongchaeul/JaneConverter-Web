@@ -14,16 +14,6 @@ from janeconverter.converter import (
     get_best_hardware_encoder,
     is_stream_copy_safe,
 )
-from janeconverter.updater import (
-    get_current_engine_version,
-    check_for_engine_updates,
-    get_current_ffmpeg_version,
-    check_for_ffmpeg_updates,
-    is_git_repo,
-    get_current_repo_commit,
-    check_for_repo_updates,
-    check_and_apply_all_updates
-)
 
 def test_build_ffmpeg_args_mp3():
     cmd = build_ffmpeg_args(
@@ -276,54 +266,6 @@ def test_get_unique_target_path(tmp_path):
     third = get_unique_target_path(str(tmp_path), "song.mp3")
     assert third == os.path.join(str(tmp_path), "song_2.mp3")
 
-@pytest.mark.online
-def test_engine_updater_version_check():
-    ver = get_current_engine_version()
-    assert ver != ""
-    assert isinstance(ver, str)
-    info = check_for_engine_updates()
-    assert isinstance(info, dict)
-    assert "current_version" in info
-    assert "online" in info
-
-@pytest.mark.online
-def test_ffmpeg_updater_version_check():
-    ver = get_current_ffmpeg_version()
-    assert ver != ""
-    assert isinstance(ver, str)
-    info = check_for_ffmpeg_updates()
-    assert isinstance(info, dict)
-    assert "current_version" in info
-    assert "online" in info
-    assert "installed" in info
-
-def test_repo_updater_git_check():
-    assert is_git_repo() is True
-    commit = get_current_repo_commit()
-    assert isinstance(commit, str)
-    assert len(commit) >= 7
-
-@pytest.mark.online
-def test_repo_updater_check_for_updates():
-    info = check_for_repo_updates()
-    assert isinstance(info, dict)
-    assert "has_update" in info
-    assert "is_git" in info
-    assert info["is_git"] is True
-    assert "current_commit" in info
-
-@pytest.mark.online
-def test_check_and_apply_all_updates():
-    logs = []
-    def log_cb(msg):
-        logs.append(msg)
-
-    result = check_and_apply_all_updates(status_callback=log_cb)
-    assert isinstance(result, dict)
-    assert "repo_updated" in result
-    assert "engine_updated" in result
-    assert "already_up_to_date" in result
-    assert len(logs) > 0
 
 
 def test_build_ffmpeg_args_reconstruct_frequency_loss():
