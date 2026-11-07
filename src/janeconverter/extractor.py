@@ -828,6 +828,7 @@ def fetch_media_stream(
     target_format: Optional[str] = None,
     save_cover_art: bool = True,
     pre_extracted_info: Optional[Dict[str, Any]] = None,
+    proxy: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Fetches the media stream from a URL (or validates local file) into output_dir.
@@ -1153,6 +1154,9 @@ def fetch_media_stream(
         "logger": _AuthenticatedYtdlpLogger(report),
         "progress_hooks": [progress_hook]
     }
+    effective_proxy = proxy or os.getenv("JANE_PROXY") or os.getenv("YTDLP_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+    if effective_proxy:
+        ydl_opts["proxy"] = effective_proxy
     is_youtube_source = (
         source_type == "youtube"
         or any("youtube.com" in str(c) or "youtu.be" in str(c) or str(c).startswith("ytsearch") for c in candidates)

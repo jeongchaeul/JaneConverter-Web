@@ -510,7 +510,8 @@ export const webBridge: JaneBridge = {
     const payload = {
       source_url: request.source.startsWith("http://") || request.source.startsWith("https://") ? request.source : null,
       upload_id: request.source.startsWith("upload:") ? request.source.slice(7) : null,
-      target_format: request.format,
+      target_format: request.format || "source",
+      category: request.category || "Music",
       audio_bitrate: request.bitrate || request.audioBitrate || "320k",
       resolution: request.resolution || "1080p",
       normalize_audio: !!request.normalize,
@@ -520,15 +521,31 @@ export const webBridge: JaneBridge = {
       is_playlist: isPlaylist,
     };
 
-    const res = await fetch(`${API_BASE}/jobs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    let res: Response | null = null;
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        res = await fetch(`${API_BASE}/jobs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) break;
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          // Cloud server wake-up / redeploying in progress: retry after backoff
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+        break;
+      } catch (err) {
+        lastErr = err;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: "Failed to create conversion job" }));
-      throw new Error(err.detail || "Failed to create conversion job");
+    if (!res || !res.ok) {
+      const err = await res?.json().catch(() => ({ detail: "Failed to create conversion job. The server may be waking up, please try again." }));
+      throw new Error(err?.detail || (lastErr instanceof Error ? lastErr.message : "Failed to create conversion job."));
     }
 
     const job = await res.json();

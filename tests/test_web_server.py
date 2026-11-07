@@ -76,3 +76,19 @@ def test_upload_and_create_job(tmp_path):
 def test_playlist_inspect_rejects_private_url():
     resp = client.post("/api/v1/playlist/inspect", json={"url": "http://localhost:8000/playlist"})
     assert resp.status_code == 400
+
+
+from unittest.mock import patch
+
+def test_create_job_default_source_format():
+    job_payload = {
+        "source_url": "https://www.youtube.com/watch?v=BThCK0HF1Dw",
+        "target_format": "source",
+        "category": "Music",
+        "proxy": "http://127.0.0.1:8888",
+    }
+    with patch("worker.fetch_media_stream", return_value={"media_path": "fake.mp3", "title": "Test Track"}):
+        job_resp = client.post("/api/v1/jobs", json=job_payload)
+        assert job_resp.status_code == 202
+        job_data = job_resp.json()
+        assert "id" in job_data

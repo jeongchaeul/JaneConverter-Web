@@ -20,7 +20,9 @@ class CreateJobRequest(BaseModel):
     """Payload to initiate a new conversion job."""
     source_url: Optional[str] = Field(default=None, description="Public media or playlist URL")
     upload_id: Optional[str] = Field(default=None, description="ID of a previously uploaded local file")
-    target_format: str = Field(default="mp3", description="Target container format (mp3, wav, flac, mp4, etc.)")
+    target_format: str = Field(default="source", description="Target container format (source, mp3, wav, flac, mp4, etc.)")
+    category: Optional[str] = Field(default="Music", description="Active media category: Music, Video, or Image")
+    proxy: Optional[str] = Field(default=None, description="Optional custom HTTP/SOCKS5 proxy URL")
     audio_bitrate: str = Field(default="320k", description="Audio quality / bitrate")
     resolution: str = Field(default="1080p", description="Video resolution ceiling (capped at 1080p)")
     normalize_audio: bool = Field(default=False, description="Apply EBU R128 loudness normalization")
@@ -34,7 +36,7 @@ class CreateJobRequest(BaseModel):
     def clean_format(cls, v: str) -> str:
         cleaned = v.strip().lower().lstrip(".")
         if not cleaned:
-            return "mp3"
+            return "source"
         return cleaned
 
 

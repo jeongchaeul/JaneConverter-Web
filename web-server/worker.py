@@ -178,12 +178,19 @@ class JobManager:
         os.makedirs(job_work_dir, exist_ok=True)
         os.makedirs(job_out_dir, exist_ok=True)
 
-        fmt = req.target_format
+        fmt = (req.target_format or "source").lower()
+        is_source = fmt in ("source", "original", "")
         is_audio = fmt in SUPPORTED_AUDIO_FORMATS
         is_video = fmt in SUPPORTED_VIDEO_FORMATS
         is_image = fmt in SUPPORTED_IMAGE_FORMATS
-        if not (is_audio or is_video or is_image):
+        if not (is_source or is_audio or is_video or is_image):
             raise ValueError(f"Unsupported target format: '{fmt}'")
+
+        req_cat = (req.category or "Music").lower()
+        if is_source:
+            audio_only = (req_cat in ("music", "audio"))
+        else:
+            audio_only = is_audio
 
         # Case 1: Playlist / Album batch conversion
         if req.is_playlist:
@@ -220,11 +227,12 @@ class JobManager:
             extracted_meta = fetch_media_stream(
                 source=safe_url,
                 output_dir=job_work_dir,
-                audio_only=is_audio,
+                audio_only=audio_only,
                 resolution=req.resolution,
                 abort_event=job.abort_event,
                 progress_callback=on_extract_progress,
                 target_format=fmt,
+                proxy=req.proxy,
             )
             source_input = extracted_meta["media_path"]
         else:
@@ -242,7 +250,10 @@ class JobManager:
             return
 
         job.status = JobState.CONVERTING
-        job.emit_progress(0.55, f"Transcoding to {fmt.upper()}...")
+        if is_source:
+            job.emit_progress(0.55, "Preserving pristine source stream quality...")
+        else:
+            job.emit_progress(0.55, f"Transcoding to {fmt.upper()}...")
 
         def on_convert_progress(pct: float, msg: str):
             if job.abort_event.is_set():
@@ -250,8 +261,11 @@ class JobManager:
             # Scale conversion from 55% to 95%
             job.emit_progress(0.55 + (pct * 0.40), msg)
 
-        out_filename = f"{extracted_meta.get('title') or 'converted_media'}.{fmt}"
-        out_filename = "".join(c for c in out_filename if c.isalnum() or c in " ._-()").strip()
+        if is_source:
+            out_filename = None
+        else:
+            out_filename = f"{extracted_meta.get('title') or 'converted_media'}.{fmt}"
+            out_filename = "".join(c for c in out_filename if c.isalnum() or c in " ._-()").strip()
 
         converted_path = convert_media(
             input_path=source_input,
@@ -262,6 +276,7 @@ class JobManager:
             normalize_audio=req.normalize_audio,
             resolution=req.resolution,
             use_gpu=False,  # Cloud server CPU transcode
+            expected_category=req.category,
             metadata={
                 "title": extracted_meta.get("title", ""),
                 "artist": extracted_meta.get("artist", ""),
