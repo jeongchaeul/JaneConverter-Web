@@ -348,7 +348,7 @@ const demoBridge: JaneBridge = {
   async chooseFolder() { return null; },
   async openPath() {},
   async openFile() {},
-  async openUrl() {},
+  async openUrl(url: string) { if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer"); },
   async startConversion() { return "preview-job"; },
   async requeueTrack() { return true; },
   async captureFacebookAlbum() { throw new Error("Facebook album capture is available in the JaneConverter desktop app."); },
@@ -534,6 +534,71 @@ export const webBridge: JaneBridge = {
     const job = await res.json();
     const jobId = job.id;
 
+    function triggerDownload(url: string, filename?: string) {
+      if (typeof window === "undefined") return;
+      const fullUrl = url.startsWith("http") ? url : `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`;
+      try {
+        const a = document.createElement("a");
+        a.href = fullUrl;
+        a.download = filename || "converted_media";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          if (document.body.contains(a)) document.body.removeChild(a);
+        }, 2000);
+      } catch {
+        window.location.assign(fullUrl);
+      }
+    }
+
+    let isCompleted = false;
+
+    // Backup polling loop every 1.5s in case SSE cuts out or proxy disconnects
+    const pollTimer = setInterval(async () => {
+      if (isCompleted) {
+        clearInterval(pollTimer);
+        return;
+      }
+      try {
+        const checkRes = await fetch(`${API_BASE}/jobs/${jobId}`);
+        if (!checkRes.ok) return;
+        const jobData = await checkRes.json();
+        const statusMap: Record<string, EventKind> = {
+          queued: "status",
+          downloading: "progress",
+          converting: "progress",
+          completed: "finished",
+          failed: "failed",
+          cancelled: "cancelled",
+        };
+        const kind: EventKind = statusMap[jobData.status] || "status";
+        const evt: ConverterEvent = {
+          jobId,
+          kind,
+          progress: typeof jobData.progress === "number" ? Math.max(0, Math.min(1, jobData.progress)) : 0,
+          message: jobData.step,
+          output: jobData.download_url || jobData.filename || undefined,
+        };
+        eventListeners.forEach((fn) => fn(evt));
+
+        if (jobData.status === "completed" || jobData.status === "failed" || jobData.status === "cancelled") {
+          isCompleted = true;
+          clearInterval(pollTimer);
+          const s = activeEventSources.get(jobId);
+          if (s) {
+            s.close();
+            activeEventSources.delete(jobId);
+          }
+          if (jobData.status === "completed" && jobData.download_url) {
+            triggerDownload(jobData.download_url, jobData.filename);
+          }
+        }
+      } catch {
+        // network poll ignore
+      }
+    }, 1500);
+
     const sse = new EventSource(`${API_BASE}/jobs/${jobId}/events`);
     activeEventSources.set(jobId, sse);
 
@@ -552,23 +617,24 @@ export const webBridge: JaneBridge = {
         const evt: ConverterEvent = {
           jobId,
           kind,
-          progress: Math.round(data.progress * 100),
+          progress: typeof data.progress === "number" ? Math.max(0, Math.min(1, data.progress)) : 0,
           message: data.step,
-          output: data.filename || undefined,
+          output: data.download_url || data.filename || undefined,
         };
 
         eventListeners.forEach((fn) => fn(evt));
 
-        if (data.status === "completed" && data.download_url) {
+        if (data.status === "completed") {
+          isCompleted = true;
+          clearInterval(pollTimer);
           sse.close();
           activeEventSources.delete(jobId);
-          const a = document.createElement("a");
-          a.href = data.download_url;
-          a.download = data.filename || "converted_media";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          if (data.download_url) {
+            triggerDownload(data.download_url, data.filename);
+          }
         } else if (data.status === "failed" || data.status === "cancelled") {
+          isCompleted = true;
+          clearInterval(pollTimer);
           sse.close();
           activeEventSources.delete(jobId);
         }
@@ -578,6 +644,7 @@ export const webBridge: JaneBridge = {
     };
 
     sse.onerror = () => {
+      // Don't kill conversion tracking if SSE disconnects; let backup pollTimer complete it
       sse.close();
       activeEventSources.delete(jobId);
     };
@@ -590,6 +657,14 @@ export const webBridge: JaneBridge = {
       sse.close();
       activeEventSources.delete(jobId);
     }
+    // Emit immediate cancelled event locally so UI resets instantly without hanging on 'Aborting conversion...'
+    const evt: ConverterEvent = {
+      jobId,
+      kind: "cancelled",
+      message: "Conversion cancelled by user.",
+    };
+    eventListeners.forEach((fn) => fn(evt));
+
     await fetch(`${API_BASE}/jobs/${jobId}`, { method: "DELETE" }).catch(() => {});
   },
   async subscribe(listener: (event: ConverterEvent) => void): Promise<UnlistenFn> {

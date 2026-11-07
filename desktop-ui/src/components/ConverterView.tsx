@@ -1437,6 +1437,13 @@ export function ConverterView({
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={completedItem.path?.startsWith("http") || completedItem.path?.startsWith("/api") ? completedItem.path : `/api/v1/jobs/${lastEvent?.jobId}/download`}
+                download={completedItem.name}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors"
+              >
+                <ArrowDownToLine className="size-3.5" /> Download File
+              </a>
               {completedItem.path && (
                 <button
                   type="button"

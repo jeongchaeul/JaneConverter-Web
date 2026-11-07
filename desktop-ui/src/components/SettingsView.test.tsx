@@ -147,40 +147,21 @@ describe("Settings updates", () => {
 
 
 
-  it('renders the User Manual guide and allows tab navigation', async () => {
+  it('renders Appearance and System tabs and verifies User Manual is moved to sidebar', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<SettingsView runtime={sourceRuntime} onStatus={vi.fn()} initialTab="guide" />);
+      root.render(<SettingsView runtime={sourceRuntime} onStatus={vi.fn()} initialTab="system" />);
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain('User Manual & Quick Reference');
-    expect(container.textContent).toContain('Quick Start: Convert in 3 Steps');
-    expect(container.textContent).toContain('Supported Platforms & What They Do');
-    expect(container.textContent).toContain('Getting Started');
-    expect(container.textContent).toContain('Story Capturer');
-
-    // Navigate to FL Studio Downgrader sub-page
-    const flpTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('FL Studio Downgrader'));
-    expect(flpTab).toBeTruthy();
-    await act(async () => {
-      flpTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(container.textContent).toContain('FL Studio (.flp) Project Downgrader');
-
-    // Navigate to Presets & FAQ sub-page
-    const faqTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Presets & FAQ'));
-    expect(faqTab).toBeTruthy();
-    await act(async () => {
-      faqTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-    expect(container.textContent).toContain('Presets & Format Cheat Sheet');
-    expect(container.textContent).toContain('Quick Troubleshooting & FAQ');
+    expect(container.textContent).toContain('System Diagnostics & Runtime');
+    expect(container.textContent).toContain('Runtime Readiness');
+    expect(container.textContent).toContain('Continuous Auto-Updates');
+    expect(container.textContent).toContain('Appearance');
+    expect(container.textContent).not.toContain('User Manual & Quick Reference');
 
     await act(async () => { root.unmount(); });
     container.remove();

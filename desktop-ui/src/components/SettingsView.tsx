@@ -26,7 +26,7 @@ import { SettingsThemeTab } from "./settings/SettingsThemeTab";
 import { SettingsSystemTab } from "./settings/SettingsSystemTab";
 import { SettingsGuideTab } from "./settings/SettingsGuideTab";
 
-export type SettingsTab = "theme" | "system" | "guide";
+export type SettingsTab = "theme" | "system";
 
 export function SettingsView({
   runtime,
@@ -254,7 +254,7 @@ export function SettingsView({
           {[
             { id: "theme" as const, label: "Appearance", icon: Palette },
             { id: "system" as const, label: "System & Runtime", icon: HardDrive },
-            { id: "guide" as const, label: "User Manual", icon: BookOpen },
+            
           ].map((tab) => {
             const Icon = tab.icon;
             const isSelected = activeTab === tab.id;
@@ -313,9 +313,7 @@ export function SettingsView({
         <SettingsSystemTab runtime={runtime} />
       )}
 
-      {activeTab === "guide" && (
-        <SettingsGuideTab />
-      )}
+      
 
       {/* Status Bar */}
       <div

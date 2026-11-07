@@ -70,13 +70,14 @@ export function UserManualView() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void bridge.openUrl("https://github.com/jeongchaeul/JaneConverter/releases")}
-          className="subtle-button flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-300 hover:text-white"
+        <a
+          href="https://github.com/jeongchaeul/JaneConverter/releases/latest"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="subtle-button inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-300 hover:text-white"
         >
           <ExternalLink className="size-3" /> Download Desktop App on GitHub
-        </button>
+        </a>
       </div>
 
       {/* Feature Matrix Callout Card */}

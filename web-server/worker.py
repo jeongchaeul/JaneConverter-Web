@@ -156,10 +156,14 @@ class JobManager:
             try:
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, self._execute_job_sync, job)
-            except Exception as e:
-                job.status = JobState.FAILED
-                job.error = str(e)
-                job.emit_progress(job.progress, f"Error: {e}")
+            except (Exception, BaseException) as e:
+                if job.abort_event.is_set() or "cancelled" in str(e).lower():
+                    job.status = JobState.CANCELLED
+                    job.emit_progress(job.progress, "Conversion cancelled by user.")
+                else:
+                    job.status = JobState.FAILED
+                    job.error = str(e)
+                    job.emit_progress(job.progress, f"Error: {e}")
             finally:
                 job.completed_at = time.time()
 
@@ -205,7 +209,7 @@ class JobManager:
 
             def on_extract_progress(pct: float, msg: str):
                 if job.abort_event.is_set():
-                    raise KeyboardInterrupt("Cancelled by user.")
+                    raise RuntimeError("Cancelled by user.")
                 # Scale extraction from 10% to 50%
                 job.emit_progress(0.10 + (pct * 0.40), msg)
 
@@ -231,7 +235,7 @@ class JobManager:
 
         def on_convert_progress(pct: float, msg: str):
             if job.abort_event.is_set():
-                raise KeyboardInterrupt("Cancelled by user.")
+                raise RuntimeError("Cancelled by user.")
             # Scale conversion from 55% to 95%
             job.emit_progress(0.55 + (pct * 0.40), msg)
 

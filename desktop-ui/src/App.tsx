@@ -1,3 +1,4 @@
+import { ConsoleView } from "./components/ConsoleView";
 function isAppUpdateAvailable(repoUpdate?: { has_update?: boolean } | null): boolean {
   return Boolean(repoUpdate?.has_update);
 }
@@ -865,7 +866,7 @@ export default function App() {
       setPaused(false);
       setProgress(.02);
       setStatus("Starting conversion...");
-      setActiveView("converter");
+      setActiveView("console");
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -985,6 +986,57 @@ export default function App() {
     />
   ) : activeView === "manual" ? (
     <UserManualView />
+  ) : activeView === "console" ? (
+    <ConsoleView
+      events={events}
+      rawEvents={rawEvents}
+      jobId={jobId || undefined}
+      running={Boolean(jobId) || captureBusy}
+      paused={paused}
+      progress={progress}
+      sourceTitle={activeJobContextRef.current?.source || selectedCapture?.name || ""}
+      outputDir={activeJobContextRef.current?.exportedPath || settings.outputDir}
+      category={settings.category}
+      format={settings.format}
+      settings={activeJobContextRef.current?.effectiveSettings || settings}
+      initialMode="in_progress"
+      historyItems={history}
+      onPauseToggle={pauseToggle}
+      onAbort={cancel}
+      onClear={(targetJobId?: string) => {
+        if (targetJobId) {
+          setEvents((prev) => prev.filter((e) => e.jobId !== targetJobId));
+          if (jobId === targetJobId) {
+            setJobId("");
+            setProgress(0);
+          }
+        } else {
+          setEvents([]);
+          setJobId("");
+          setProgress(0);
+        }
+      }}
+      onClearRaw={() => {
+        setRawEvents([]);
+      }}
+      onStatus={statusMessage}
+      onNavigateToConverter={() => setActiveView("converter")}
+      onNavigateToLibrary={() => setActiveView("library")}
+      onRestoreSession={(item) => {
+        const syntheticEvents: ConverterEvent[] = [
+          { jobId: item.id, kind: "started", message: `[*] Conversion: ${item.fileName || item.source}` },
+          { jobId: item.id, kind: "log", message: `Ready! File exported to: ${item.fileName || item.exportPath}` },
+          { jobId: item.id, kind: "log", message: `DONE! Exported: ${item.exportPath}` },
+          { jobId: item.id, kind: "finished", message: "Conversion finished. Your media is ready.", output: item.exportPath },
+        ];
+        setEvents((prev) => [...prev, ...syntheticEvents]);
+        setRawEvents((prev) => [...prev, ...syntheticEvents]);
+      }}
+      onRetryItem={async (item) => {
+        statusMessage(`Retrying: ${item.title}...`);
+        await start(item.url || activeJobContextRef.current?.source || "");
+      }}
+    />
   ) : null;
 
   return (
@@ -1036,7 +1088,8 @@ export default function App() {
         />
         <div className="relative flex min-w-0 flex-1 flex-col h-full overflow-hidden">
 
-        <main className="min-h-0 flex-1 px-8 py-6 overflow-y-auto">
+        <main className={`min-h-0 flex-1 px-8 py-6 ${activeView === "console" ? "flex flex-col overflow-hidden" : "overflow-y-auto"}`}>
+
           <div className={activeView === "converter" ? "block" : "hidden"}>
             <ConverterView
               settings={settings}
@@ -1068,7 +1121,7 @@ export default function App() {
           {activeView !== "converter" && (
             <div
               key={activeView}
-              className="h-full"
+              className={activeView === "console" ? "flex flex-col flex-1 min-h-0 h-full" : "h-full"}
             >
               {secondaryContent}
             </div>

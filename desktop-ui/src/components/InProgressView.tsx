@@ -1,0 +1,1088 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  LayoutGrid,
+  List,
+  Music,
+  Search,
+} from "lucide-react";
+import { bridge, type Category, type ConverterEvent, type ConversionHistoryItem, type ConverterSettings } from "../bridge";
+import { findPresetName } from "../options";
+import { InProgressHeader } from "./inprogress/InProgressHeader";
+import { ItemCard } from "./inprogress/ItemCard";
+import { ItemContextMenu } from "./inprogress/ItemContextMenu";
+import { SessionHistoryModal } from "./inprogress/SessionHistoryModal";
+import {
+  extractDistinctJobIds,
+  extractYouTubeThumbnail,
+  inferMediaKind,
+  parseConversionEvents,
+} from "./inprogress/parser";
+import type {
+  InProgressBatchSummary,
+  InProgressItem,
+  InProgressItemStatus,
+  MediaKind,
+  SessionSummary,
+} from "./inprogress/types";
+
+export type {
+  InProgressBatchSummary,
+  InProgressItem,
+  InProgressItemStatus,
+  MediaKind,
+  SessionSummary,
+};
+export {
+  extractYouTubeThumbnail,
+  inferMediaKind,
+  parseConversionEvents,
+};
+
+export function InProgressView({
+  events,
+  jobId,
+  running = false,
+  paused = false,
+  progress = 0,
+  sourceTitle = "",
+  outputDir = "",
+  category,
+  format,
+  settings,
+  historyItems = [],
+  conversionTimings = {},
+  onPauseToggle,
+  onAbort,
+  onClear,
+  onOpenRawConsole,
+  onStatus,
+  onNavigateToConverter,
+  onNavigateToLibrary,
+  onRestoreSession,
+  onRetryItem,
+}: {
+  events: ConverterEvent[];
+  jobId?: string;
+  running?: boolean;
+  paused?: boolean;
+  progress?: number;
+  sourceTitle?: string;
+  outputDir?: string;
+  category?: Category;
+  format?: string;
+  settings?: ConverterSettings;
+  historyItems?: ConversionHistoryItem[];
+  conversionTimings?: Record<string, number>;
+  onPauseToggle?: () => Promise<void> | void;
+  onAbort?: () => Promise<void> | void;
+  onClear?: (targetJobId?: string) => void;
+  onOpenRawConsole: () => void;
+  onStatus: (message: string) => void;
+  onNavigateToConverter?: () => void;
+  onNavigateToHistory?: () => void;
+  onNavigateToLibrary?: () => void;
+  onRestoreSession?: (item: ConversionHistoryItem) => void;
+  onRetryItem?: (item: InProgressItem) => void;
+}) {
+  const [layoutMode, setLayoutMode] = useState<"grid" | "list">("grid");
+  const [filterState, setFilterState] = useState<"all" | "active" | "done" | "failed">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+  const [showSessionModal, setShowSessionModal] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: InProgressItem } | null>(null);
+  const [deletedItemIds, setDeletedItemIds] = useState<Set<string>>(new Set());
+  const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [contextMenu]);
+
+  // Extract distinct chronological jobs from conversion events
+  const distinctJobIds = useMemo(
+    () => extractDistinctJobIds(events, jobId, running, category, format),
+    [events, jobId, running, category, format],
+  );
+
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const requestedThumbnailsRef = useRef<Set<string>>(new Set());
+  const inFlightThumbnailsRef = useRef<Set<string>>(new Set());
+
+  // Automatically follow live active job when running or when a new job starts
+  useEffect(() => {
+    if (jobId) {
+      setSelectedJobId(jobId);
+    }
+  }, [jobId]);
+
+  // Derive currently displayed job ID
+  const currentJobId = useMemo(() => {
+    if (selectedJobId && distinctJobIds.includes(selectedJobId)) {
+      return selectedJobId;
+    }
+    if (jobId && distinctJobIds.includes(jobId)) {
+      return jobId;
+    }
+    return distinctJobIds.length > 0 ? distinctJobIds[distinctJobIds.length - 1] : (jobId || undefined);
+  }, [selectedJobId, distinctJobIds, jobId]);
+
+  const currentIndex = currentJobId ? distinctJobIds.indexOf(currentJobId) : -1;
+  const hasPrevious = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < distinctJobIds.length - 1;
+  const isViewingLive = Boolean(running && jobId && currentJobId === jobId);
+
+  function handleNavigateSession(offset: number) {
+    if (currentIndex === -1) return;
+    const targetIdx = currentIndex + offset;
+    if (targetIdx >= 0 && targetIdx < distinctJobIds.length) {
+      setSelectedJobId(distinctJobIds[targetIdx]);
+    }
+  }
+
+  function handleClear() {
+    if (!onClear) return;
+    if (currentJobId) {
+      onClear(currentJobId);
+      setPreviews((prev) => {
+        const next = { ...prev };
+        for (const k of Object.keys(next)) {
+          if (k.startsWith(`${currentJobId}:`)) {
+            delete next[k];
+          }
+        }
+        return next;
+      });
+      for (const k of Array.from(requestedThumbnailsRef.current)) {
+        if (k.startsWith(`${currentJobId}:`)) {
+          requestedThumbnailsRef.current.delete(k);
+        }
+      }
+      for (const k of Array.from(inFlightThumbnailsRef.current)) {
+        if (k.startsWith(`${currentJobId}:`)) {
+          inFlightThumbnailsRef.current.delete(k);
+        }
+      }
+      const remaining = distinctJobIds.filter((id) => id !== currentJobId);
+      if (remaining.length > 0) {
+        const nextIdx = Math.max(0, Math.min(currentIndex, remaining.length - 1));
+        setSelectedJobId(remaining[nextIdx]);
+      } else {
+        setSelectedJobId(null);
+      }
+    } else {
+      onClear();
+      setPreviews({});
+      requestedThumbnailsRef.current.clear();
+      inFlightThumbnailsRef.current.clear();
+      setSelectedJobId(null);
+    }
+  }
+
+  const isOngoing = Boolean(running || paused);
+  const hasNoPages = distinctJobIds.length <= 0;
+  const isClosePageDisabled = hasNoPages || isOngoing;
+
+  function handleClosePage() {
+    if (isClosePageDisabled) return;
+    handleClear();
+  }
+
+  // Clear previews and thumbnail caches when events are completely wiped
+  useEffect(() => {
+    if (events.length === 0) {
+      setPreviews({});
+      setFailedImages({});
+      requestedThumbnailsRef.current.clear();
+      inFlightThumbnailsRef.current.clear();
+      setSelectedJobId(null);
+      setDeletedItemIds(new Set());
+      setDeletingItemIds(new Set());
+    }
+  }, [events.length]);
+
+  // Parse events into structured items & batch summary scoped to displayed job
+  const { items, summary, latestLogLine } = useMemo(
+    () => parseConversionEvents(events, category, format, isViewingLive ? sourceTitle : undefined, currentJobId, isViewingLive && running),
+    [events, category, format, sourceTitle, currentJobId, isViewingLive, running]
+  );
+
+  // Computed session summaries for in-memory jobs (only computed when modal is open to avoid O(N * M) regex recomputation on live progress)
+  const sessionSummaries = useMemo<SessionSummary[]>(() => {
+    if (!showSessionModal) return [];
+    return distinctJobIds.map((id, index) => {
+      const isLive = Boolean(running && jobId && id === jobId);
+      const isCurrent = id === currentJobId;
+      const { items, summary: sSummary } = parseConversionEvents(
+        events,
+        category,
+        format,
+        id === jobId ? sourceTitle : undefined,
+        id,
+        isLive
+      );
+      const hist = historyItems.find(
+        (h) => h.id === id || h.id.startsWith(id + "-") || (sSummary.title && (h.fileName === sSummary.title || h.source === sSummary.title))
+      );
+      let elapsedMs = hist?.elapsedMs;
+      if (elapsedMs === undefined && sSummary.title) {
+        const titleLower = sSummary.title.toLowerCase();
+        for (const [k, v] of Object.entries(conversionTimings)) {
+          if (k.toLowerCase().includes(titleLower) && typeof v === "number" && v > 0) {
+            elapsedMs = v;
+            break;
+          }
+        }
+      }
+      if (elapsedMs === undefined) {
+        const itemElapsed = items
+          .map((it) => getItemElapsedMs(it))
+          .filter((t): t is number => typeof t === "number" && t > 0);
+        if (itemElapsed.length > 0) {
+          elapsedMs = itemElapsed.reduce((a, b) => a + b, 0);
+        }
+      }
+      return {
+        id,
+        sessionNumber: index + 1,
+        title: sSummary.title || `Session #${index + 1}`,
+        total: sSummary.total,
+        completed: sSummary.completed,
+        failed: sSummary.failed,
+        active: sSummary.active,
+        mediaKind: sSummary.mediaKind,
+        format: sSummary.format,
+        isLive,
+        isCurrent,
+        overallProgress: sSummary.overallProgress,
+        elapsedMs,
+      };
+    }).reverse();
+  }, [showSessionModal, distinctJobIds, events, category, format, jobId, running, currentJobId, sourceTitle, historyItems]);
+
+  // Historical sessions from catalog
+  const catalogSessions = useMemo(() => {
+    if (!historyItems || historyItems.length === 0) return [];
+    return historyItems.filter((h) => !distinctJobIds.includes(h.id));
+  }, [historyItems, distinctJobIds]);
+
+  function getItemPreview(item: InProgressItem): string | undefined {
+    const jobKey = currentJobId || "default";
+    const itemKey = `item-${item.index}`;
+
+    const cached =
+      previews[`${jobKey}:${itemKey}`] ||
+      previews[`${jobKey}:${item.id}`] ||
+      (item.outputPath ? previews[`${jobKey}:${item.outputPath}`] : undefined) ||
+      previews[itemKey] ||
+      previews[item.id] ||
+      (item.outputPath ? previews[item.outputPath] : undefined);
+
+    if (cached && !failedImages[cached]) {
+      return cached;
+    }
+
+    if (item.thumbnail && !failedImages[item.thumbnail]) {
+      return item.thumbnail;
+    }
+
+    if (
+      item.coverPath &&
+      (item.coverPath.startsWith("http://") ||
+        item.coverPath.startsWith("https://") ||
+        item.coverPath.startsWith("data:")) &&
+      !failedImages[item.coverPath]
+    ) {
+      return item.coverPath;
+    }
+
+    return undefined;
+  }
+
+  function getBatchCover(): string | undefined {
+    const jobKey = currentJobId || "default";
+    const cached = previews[`${jobKey}:batch_cover`] || previews["batch_cover"];
+    if (cached && !failedImages[cached]) {
+      return cached;
+    }
+    if (
+      summary.coverArtPath &&
+      (summary.coverArtPath.startsWith("http://") ||
+        summary.coverArtPath.startsWith("https://") ||
+        summary.coverArtPath.startsWith("data:")) &&
+      !failedImages[summary.coverArtPath]
+    ) {
+      return summary.coverArtPath;
+    }
+    return undefined;
+  }
+
+  // Remaining active items excluding deleted ones
+  const remainingItems = useMemo(
+    () => items.filter((it) => !deletedItemIds.has(it.id)),
+    [items, deletedItemIds]
+  );
+  const totalCount = remainingItems.length;
+  const doneCount = useMemo(
+    () => remainingItems.filter((it) => it.status === "ready").length,
+    [remainingItems]
+  );
+  const activeCount = useMemo(
+    () => remainingItems.filter((it) => it.status === "downloading" || it.status === "transcoding").length,
+    [remainingItems]
+  );
+  const failedCount = useMemo(
+    () => remainingItems.filter((it) => it.status === "failed").length,
+    [remainingItems]
+  );
+
+  // Conversion Settings & Presets
+  const currentHistoryItem = useMemo(() => {
+    if (!currentJobId) return undefined;
+    return historyItems.find((h) => h.id === currentJobId);
+  }, [currentJobId, historyItems]);
+
+  const presetBadge = useMemo(() => {
+    if (currentHistoryItem?.presetName) return currentHistoryItem.presetName;
+    if (settings) return findPresetName(settings);
+    return undefined;
+  }, [currentHistoryItem, settings]);
+
+  const formatBadge = useMemo(() => {
+    if (currentHistoryItem?.formatLabel) return currentHistoryItem.formatLabel;
+    if (summary.format) return summary.format.toUpperCase();
+    if (settings?.format) return settings.format.toUpperCase();
+    if (format) return format.toUpperCase();
+    return undefined;
+  }, [currentHistoryItem, summary.format, settings?.format, format]);
+
+  const qualityBadge = useMemo(() => {
+    if (currentHistoryItem?.qualityLabel) return currentHistoryItem.qualityLabel;
+    if (settings) {
+      if (settings.category === "Video") {
+        const res = settings.resolution === "original" ? "Original Res" : settings.resolution.toUpperCase();
+        const vBitrate = settings.bitrate === "original" ? "Original Quality" : settings.bitrate.toUpperCase();
+        const aBitrate = settings.audioBitrate && settings.audioBitrate !== "original" ? ` • ${settings.audioBitrate}` : "";
+        return `${vBitrate} • ${res}${aBitrate}`;
+      }
+      if (settings.category === "Image") {
+        return settings.format === "png" ? "Lossless" : `${settings.bitrate.toUpperCase()} Quality`;
+      }
+      const bitrateStr = settings.bitrate.endsWith("k") ? `${settings.bitrate.slice(0, -1)} kbps` : settings.bitrate;
+      const khz = `${(settings.sampleRate / 1000).toFixed(1).replace(/\.0$/, "")}kHz`;
+      return `${bitrateStr} • ${khz}`;
+    }
+    return undefined;
+  }, [currentHistoryItem, settings]);
+
+  // Filter items for display
+  const displayedItems = useMemo(() => {
+    let list = remainingItems;
+    if (filterState === "active") {
+      list = list.filter((it) => it.status === "downloading" || it.status === "transcoding");
+    } else if (filterState === "done") {
+      list = list.filter((it) => it.status === "ready");
+    } else if (filterState === "failed") {
+      list = list.filter((it) => it.status === "failed");
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((it) => it.title.toLowerCase().includes(q) || (it.artist && it.artist.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [remainingItems, filterState, searchQuery]);
+
+  // Reset pagination on session, filter, or search change
+  useEffect(() => {
+    setPage(1);
+  }, [currentJobId, filterState, searchQuery]);
+
+  const ITEMS_PER_PAGE = 32;
+  const totalPages = Math.max(1, Math.ceil(displayedItems.length / ITEMS_PER_PAGE));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const paginatedItems = useMemo(() => {
+    return displayedItems.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [displayedItems, startIndex]);
+
+  const activeItemIndex = useMemo(() => {
+    return displayedItems.findIndex((it) => it.status === "downloading" || it.status === "transcoding");
+  }, [displayedItems]);
+  const activeItemPage = activeItemIndex >= 0 ? Math.floor(activeItemIndex / ITEMS_PER_PAGE) + 1 : null;
+
+  // Load thumbnails ONLY for visible items on the active page (with deduplication & in-flight tracking)
+  useEffect(() => {
+    const resolvedDir = summary.outputDir || outputDir;
+    if (!resolvedDir) return;
+
+    const jobKey = currentJobId || "default";
+    const batchCoverKey = `${jobKey}:batch_cover`;
+
+    if (!previews[batchCoverKey] && summary.coverArtPath && !requestedThumbnailsRef.current.has(batchCoverKey)) {
+      requestedThumbnailsRef.current.add(batchCoverKey);
+      bridge.getThumbnail(resolvedDir, summary.coverArtPath)
+        .then((thumb) => {
+          if (thumb) setPreviews((prev) => ({ ...prev, [batchCoverKey]: thumb }));
+        })
+        .catch(() => {});
+    }
+
+    const MAX_CONCURRENT_THUMBS = 2;
+    const processNext = () => {
+      if (inFlightThumbnailsRef.current.size >= MAX_CONCURRENT_THUMBS) return;
+
+      for (const item of paginatedItems) {
+        if (inFlightThumbnailsRef.current.size >= MAX_CONCURRENT_THUMBS) break;
+        const itemKey = `${jobKey}:item-${item.index}`;
+        if (
+          previews[itemKey] ||
+          requestedThumbnailsRef.current.has(itemKey) ||
+          inFlightThumbnailsRef.current.has(itemKey)
+        ) {
+          continue;
+        }
+
+        const targetPath = item.coverPath
+          || (item.outputPath
+            ? (item.outputPath.includes(":\\") || item.outputPath.startsWith("/")
+              ? item.outputPath
+              : `${resolvedDir.replace(/[\\/]$/, "")}\\${item.outputPath}`)
+            : null);
+
+        if (targetPath) {
+          inFlightThumbnailsRef.current.add(itemKey);
+          bridge.getThumbnail(resolvedDir, targetPath)
+            .then((thumb) => {
+              requestedThumbnailsRef.current.add(itemKey);
+              inFlightThumbnailsRef.current.delete(itemKey);
+              if (thumb) {
+                setPreviews((prev) => ({
+                  ...prev,
+                  [itemKey]: thumb,
+                  [`${jobKey}:${item.id}`]: thumb,
+                  ...(item.outputPath ? { [`${jobKey}:${item.outputPath}`]: thumb } : {}),
+                }));
+              }
+              processNext();
+            })
+            .catch(() => {
+              requestedThumbnailsRef.current.add(itemKey);
+              inFlightThumbnailsRef.current.delete(itemKey);
+              processNext();
+            });
+        }
+      }
+    };
+
+    processNext();
+  }, [paginatedItems, outputDir, summary.outputDir, summary.coverArtPath, currentJobId]);
+
+  async function openOutputFolder() {
+    let dir = summary.outputDir || outputDir;
+    if (!summary.outputDir && items.length > 0) {
+      const firstWithOutput = items.find((it) => it.outputPath);
+      if (firstWithOutput) {
+        const full = getItemFullPath(firstWithOutput);
+        if (full) {
+          const idx = Math.max(full.lastIndexOf("\\"), full.lastIndexOf("/"));
+          if (idx > 0) dir = full.slice(0, idx);
+        }
+      }
+    }
+    if (!dir) {
+      onStatus("No output directory recorded yet.");
+      return;
+    }
+    try {
+      await bridge.openPath(dir);
+      onStatus(`Opened: ${dir}`);
+    } catch (err) {
+      onStatus(`Could not open folder: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  function cleanPath(value: string) {
+    return value.trim().replace(/^\\\\\?\\UNC\\/i, "\\\\").replace(/^\\\\\?\\/, "");
+  }
+
+  function getItemFullPath(item: InProgressItem): string | undefined {
+    // 1. If item.outputPath is already an absolute path, clean and return it
+    if (item.outputPath) {
+      const cleaned = cleanPath(item.outputPath);
+      if (cleaned.includes(":\\") || cleaned.startsWith("/") || cleaned.startsWith("\\\\")) {
+        return cleaned;
+      }
+    }
+
+    // 2. Check historyItems for exact disk exportPath
+    const itemFilename = item.outputPath
+      ? cleanPath(item.outputPath).split(/[\\/]/).pop()?.toLowerCase()
+      : undefined;
+    const itemTitle = item.title.toLowerCase();
+
+    for (const hist of historyItems) {
+      if (!hist.exportPath) continue;
+      const histExport = cleanPath(hist.exportPath);
+      const histLower = histExport.toLowerCase();
+      const histBase = histExport.split(/[\\/]/).pop()?.toLowerCase();
+
+      // Direct match on filename
+      if (itemFilename && (histBase === itemFilename || histLower.endsWith("\\" + itemFilename) || histLower.endsWith("/" + itemFilename))) {
+        return histExport;
+      }
+      // If history entry is a directory containing this item
+      if (itemFilename && !/\.[a-zA-Z0-9]{2,5}$/.test(histExport)) {
+        return `${histExport.replace(/[\\/]+$/, "")}\\${item.outputPath}`;
+      }
+      // Direct match on title if history is a file
+      if (hist.fileName && hist.fileName.toLowerCase() === itemTitle && /\.[a-zA-Z0-9]{2,5}$/.test(histExport)) {
+        return histExport;
+      }
+    }
+
+    // 3. Fallback to summary.outputDir or outputDir
+    let dir = summary.outputDir || outputDir;
+    if (dir) {
+      dir = cleanPath(dir);
+      if (/\.[a-zA-Z0-9]{2,5}$/.test(dir)) {
+        const idx = Math.max(dir.lastIndexOf("\\"), dir.lastIndexOf("/"));
+        if (idx > 0) dir = dir.slice(0, idx);
+      }
+    }
+    const raw = item.outputPath || (item.coverPath && !item.coverPath.startsWith("http") && !item.coverPath.startsWith("data:") ? item.coverPath : undefined);
+    if (!raw) return dir || undefined;
+    const cleaned = cleanPath(raw);
+    if (cleaned.includes(":\\") || cleaned.startsWith("/") || cleaned.startsWith("\\\\")) {
+      return cleaned;
+    }
+    if (!dir) return cleaned;
+    return `${dir.replace(/[\\/]+$/, "")}\\${cleaned}`;
+  }
+
+  async function openItemFile(item: InProgressItem) {
+    const fullPath = getItemFullPath(item);
+    if (!fullPath) return;
+    try {
+      await bridge.openFile(fullPath);
+      onStatus(`Opened: ${item.title}`);
+    } catch (err) {
+      onStatus(`Could not open file: ${err instanceof Error ? err.message : String(err)} (${fullPath})`);
+    }
+  }
+
+  async function showItemInFolder(item: InProgressItem) {
+    const fullPath = getItemFullPath(item);
+    const dir = summary.outputDir || outputDir;
+    const target = fullPath || dir;
+    if (!target) return;
+    try {
+      await bridge.openPath(target);
+      onStatus(`Opened location: ${target}`);
+    } catch (err) {
+      onStatus(`Could not open location: ${err instanceof Error ? err.message : String(err)} (${target})`);
+    }
+  }
+
+  async function deleteItemFile(item: InProgressItem) {
+    if (deletingItemIds.has(item.id)) return;
+    const fullPath = getItemFullPath(item);
+    const root = settings?.outputDir || outputDir || summary.outputDir;
+    if (!fullPath) {
+      onStatus("No file path available to delete.");
+      return;
+    }
+    setDeletingItemIds((prev) => new Set(prev).add(item.id));
+    try {
+      if (root) {
+        await bridge.deleteLibraryEntry(root, fullPath);
+      }
+      setDeletedItemIds((prev) => new Set(prev).add(item.id));
+      onStatus(`Deleted: ${item.title}`);
+    } catch (err) {
+      onStatus(`Could not delete file: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDeletingItemIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
+  function getItemElapsedMs(item: InProgressItem): number | undefined {
+    if (item.elapsedMs !== undefined) return item.elapsedMs;
+    const full = getItemFullPath(item);
+    if (full) {
+      const key = full.replace(/\\/g, "/").toLowerCase();
+      if (conversionTimings[key]) return conversionTimings[key];
+      const fname = full.split(/[\\/]/).pop()?.toLowerCase();
+      if (fname) {
+        for (const [k, v] of Object.entries(conversionTimings)) {
+          if (k.endsWith("/" + fname) || k === fname) return v;
+        }
+      }
+      const hist = historyItems.find(
+        (h) => h.exportPath && (h.exportPath === full || h.exportPath.replace(/\\/g, "/") === full.replace(/\\/g, "/"))
+      );
+      if (hist?.elapsedMs) return hist.elapsedMs;
+    }
+    return undefined;
+  }
+
+  function handleContextMenu(e: React.MouseEvent, item: InProgressItem) {
+    e.preventDefault();
+    e.stopPropagation();
+    const menuWidth = 240;
+    const menuHeight = 280;
+    const x = Math.min(e.clientX, window.innerWidth - menuWidth - 12);
+    const y = Math.min(e.clientY, window.innerHeight - menuHeight - 12);
+    setContextMenu({ x, y, item });
+  }
+
+  const effectiveProgress = progress > 0 ? progress : summary.overallProgress;
+  const batchCover = getBatchCover();
+  const hasOutputDir = Boolean(summary.outputDir || outputDir);
+
+  // Common Header props
+  const headerProps = {
+    distinctJobCount: distinctJobIds.length,
+    currentIndex,
+    hasPrevious,
+    hasNext,
+    running,
+    paused,
+    isViewingLive,
+    liveJobId: jobId,
+    hasEvents: events.length > 0,
+    isClosePageDisabled,
+    isOngoing,
+    isSinglePage: hasNoPages,
+    hasOutputDir,
+    onNavigateSession: handleNavigateSession,
+    onOpenSessionModal: () => setShowSessionModal(true),
+    onJumpToLive: () => { if (jobId) setSelectedJobId(jobId); },
+    onPauseToggle,
+    onAbort,
+    onClear: handleClear,
+    onClosePage: handleClosePage,
+    onOpenOutputFolder: openOutputFolder,
+    onOpenRawConsole,
+  };
+
+  // Empty state when nothing has been converted in this session or overall
+  if (items.length === 0 && !isViewingLive) {
+    return (
+      <div className="mx-auto flex h-full w-full max-w-[1180px] flex-1 flex-col justify-between gap-6 min-h-0">
+        <InProgressHeader {...headerProps} />
+
+        <div className="panel flex flex-1 flex-col items-center justify-center p-8 text-center">
+          <div className="grid size-16 place-items-center rounded-2xl border border-white/10 bg-white/[0.03]">
+            <Music size={26} className="text-zinc-500" />
+          </div>
+          <h2 className="mt-4 text-base font-semibold text-white">No active conversions</h2>
+          <p className="mt-1 max-w-sm text-xs leading-relaxed text-zinc-400">
+            Paste a YouTube URL, Soundcloud link, album playlist, Facebook photo link, or drop media into the Converter to see real-time artwork, download progress, and transcoding speed.
+          </p>
+          {onNavigateToConverter && (
+            <button
+              type="button"
+              onClick={onNavigateToConverter}
+              className="mt-6 flex items-center gap-2 rounded-xl bg-[var(--accent-color,#c52b68)] px-4 py-2 text-xs font-semibold text-white shadow-[0_0_20px_var(--accent-glow,rgba(197,43,104,.4))] hover:brightness-110 transition-all"
+            >
+              Go to Converter <ChevronRight size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* Bottom Ticker */}
+        {latestLogLine && (
+          <div className="panel flex items-center justify-between px-3.5 py-2 text-xs text-zinc-400">
+            <div className="flex items-center gap-2 min-w-0 truncate font-mono text-[11px] text-zinc-300">
+              <span className="text-zinc-500">&gt;</span>
+              <span className="truncate">{latestLogLine}</span>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenRawConsole}
+              className="shrink-0 text-[11px] font-medium text-zinc-400 hover:text-white transition-colors"
+            >
+              Open Raw Console ↗
+            </button>
+          </div>
+        )}
+
+        <SessionHistoryModal
+          open={showSessionModal}
+          onClose={() => setShowSessionModal(false)}
+          sessionSummaries={sessionSummaries}
+          catalogSessions={catalogSessions}
+          onSelectSession={(id) => setSelectedJobId(id)}
+          onRemoveSession={(id) => {
+            if (currentJobId === id) handleClear();
+            else onClear?.(id);
+          }}
+          onRestoreSession={onRestoreSession}
+          onNavigateToLibrary={onNavigateToLibrary}
+        />
+
+        <ItemContextMenu
+          contextMenu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          fullPath={contextMenu ? getItemFullPath(contextMenu.item) : undefined}
+          elapsedMs={contextMenu ? getItemElapsedMs(contextMenu.item) : undefined}
+          openItemFile={openItemFile}
+          showItemInFolder={showItemInFolder}
+          openOutputFolder={openOutputFolder}
+          onOpenRawConsole={onOpenRawConsole}
+          onStatus={onStatus}
+          hasOutputDir={hasOutputDir}
+          onRetryItem={onRetryItem}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-[1180px] flex-1 flex-col gap-4 min-h-0">
+      {/* 1. Header Bar */}
+      <InProgressHeader {...headerProps} />
+
+      {/* 2. Hero Batch Card with Master Progress */}
+      <div className="panel p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4 min-w-0">
+            {batchCover && (
+              <div className="size-14 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.03]">
+                <img
+                  src={batchCover}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  onError={() => setFailedImages((prev) => ({ ...prev, [batchCover]: true }))}
+                  className="size-full object-cover"
+                />
+              </div>
+            )}
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold text-white tracking-tight">
+                {summary.title || "Converting Media"}
+              </h2>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                <span className="font-mono text-zinc-300">
+                  {doneCount} of {totalCount} completed
+                </span>
+                {activeCount > 0 && (
+                  <>
+                    <span className="text-zinc-600">•</span>
+                    <span className="text-fuchsia-400 font-medium">
+                      {activeCount} converting
+                    </span>
+                  </>
+                )}
+                {summary.queued > 0 && (
+                  <>
+                    <span className="text-zinc-600">•</span>
+                    <span className="text-zinc-500">
+                      {summary.queued} queued
+                    </span>
+                  </>
+                )}
+                {formatBadge && (
+                  <>
+                    <span className="text-zinc-600">•</span>
+                    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-mono uppercase text-zinc-200 border border-white/5">
+                      {formatBadge}
+                    </span>
+                  </>
+                )}
+                {qualityBadge && (
+                  <>
+                    <span className="text-zinc-600">•</span>
+                    <span className="font-mono text-[11px] text-zinc-400">
+                      {qualityBadge}
+                    </span>
+                  </>
+                )}
+                {presetBadge && (
+                  <>
+                    <span className="text-zinc-600">•</span>
+                    <span className="inline-flex items-center gap-1 rounded bg-[var(--accent-subtle)] border border-[var(--accent-glow)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-color)]">
+                      Preset: {presetBadge}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="text-right">
+            <div className="font-mono text-xl font-bold text-white tracking-tight">
+              {Math.round(effectiveProgress * 100)}%
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500">Overall Progress</div>
+          </div>
+        </div>
+
+        {/* Master Progress Bar */}
+        <div className="relative mt-4 h-2 w-full overflow-hidden rounded-full bg-white/[0.06]">
+          <div
+            className="h-full rounded-full transition-all duration-300"
+            style={{
+              width: `${Math.round(effectiveProgress * 100)}%`,
+              backgroundColor: "var(--accent-color, #c52b68)",
+              boxShadow: "0 0 16px var(--accent-glow, rgba(197,43,104,.6))",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 3. Toolbar: Status Filters & Grid/List Layout Mode */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 pt-1">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setFilterState("all")}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+              filterState === "all"
+                ? "bg-white/[0.1] text-white"
+                : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+            }`}
+          >
+            All ({totalCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterState("active")}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+              filterState === "active"
+                ? "bg-fuchsia-500/20 text-fuchsia-300"
+                : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+            }`}
+          >
+            Active ({activeCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilterState("done")}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+              filterState === "done"
+                ? "bg-emerald-500/20 text-emerald-300"
+                : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+            }`}
+          >
+            Done ({doneCount})
+          </button>
+          {failedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilterState("failed")}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                filterState === "failed"
+                  ? "bg-rose-500/20 text-rose-300"
+                  : "text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200"
+              }`}
+            >
+              Failed ({failedCount})
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {summary.total > 6 && (
+            <div className="relative">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input
+                type="text"
+                placeholder="Search items..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-7 w-36 rounded-lg border border-white/[0.08] bg-white/[0.025] pl-7 pr-2 text-xs text-zinc-200 placeholder-zinc-500 focus:w-48 focus:border-white/20 focus:outline-none transition-all"
+              />
+            </div>
+          )}
+
+          <div className="flex items-center rounded-lg border border-white/[0.08] bg-white/[0.025] p-0.5">
+            <button
+              type="button"
+              onClick={() => setLayoutMode("grid")}
+              aria-label="Grid layout"
+              title="Card Grid view"
+              className={`rounded p-1 text-xs transition-colors ${
+                layoutMode === "grid" ? "bg-white/[0.12] text-white" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <LayoutGrid size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setLayoutMode("list")}
+              aria-label="List layout"
+              title="Compact List view"
+              className={`rounded p-1 text-xs transition-colors ${
+                layoutMode === "list" ? "bg-white/[0.12] text-white" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <List size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Main Conversion Rack: Grid or List */}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {layoutMode === "grid" ? (
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {paginatedItems.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                layoutMode="grid"
+                preview={getItemPreview(item)}
+                fullPath={getItemFullPath(item)}
+                elapsedMs={getItemElapsedMs(item)}
+                isDeleting={deletingItemIds.has(item.id)}
+                onContextMenu={handleContextMenu}
+                onImageError={(url) => setFailedImages((prev) => ({ ...prev, [url]: true }))}
+                onStatus={onStatus}
+                onOpen={openItemFile}
+                onShowInFolder={showItemInFolder}
+                onDelete={deleteItemFile}
+                onRetry={onRetryItem}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="panel divide-y divide-white/[0.04]">
+            {paginatedItems.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                layoutMode="list"
+                preview={getItemPreview(item)}
+                fullPath={getItemFullPath(item)}
+                elapsedMs={getItemElapsedMs(item)}
+                isDeleting={deletingItemIds.has(item.id)}
+                onContextMenu={handleContextMenu}
+                onImageError={(url) => setFailedImages((prev) => ({ ...prev, [url]: true }))}
+                onStatus={onStatus}
+                onOpen={openItemFile}
+                onShowInFolder={showItemInFolder}
+                onDelete={deleteItemFile}
+                onRetry={onRetryItem}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Pagination Bar for Large Sessions */}
+      {totalPages > 1 && (
+        <div className="panel flex shrink-0 flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-xs text-zinc-400">
+          <div className="flex items-center gap-2">
+            <span>
+              Showing <span className="font-medium text-white">{startIndex + 1}</span>–
+              <span className="font-medium text-white">{Math.min(startIndex + ITEMS_PER_PAGE, displayedItems.length)}</span> of{" "}
+              <span className="font-medium text-white">{displayedItems.length}</span> items
+            </span>
+            {activeItemPage && activeItemPage !== currentPage && (
+              <button
+                type="button"
+                onClick={() => setPage(activeItemPage)}
+                className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                title={`Jump to active item on page ${activeItemPage}`}
+              >
+                <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Jump to active (Page {activeItemPage})
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={currentPage <= 1}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              className="subtle-button flex items-center gap-1 px-2.5 py-1 text-xs disabled:pointer-events-none disabled:opacity-30"
+              aria-label="Previous page"
+            >
+              <ChevronLeft size={13} /> Previous
+            </button>
+            <span className="px-2 font-mono text-[11px] text-zinc-300">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              className="subtle-button flex items-center gap-1 px-2.5 py-1 text-xs disabled:pointer-events-none disabled:opacity-30"
+              aria-label="Next page"
+            >
+              Next <ChevronRight size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Bottom Live Ticker Dock */}
+      {latestLogLine && (
+        <div className="panel flex shrink-0 items-center justify-between px-3.5 py-2 text-xs text-zinc-400">
+          <div className="flex items-center gap-2 min-w-0 truncate font-mono text-[11px] text-zinc-300">
+            <span className="text-zinc-500">&gt;</span>
+            <span className="truncate">{latestLogLine}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenRawConsole}
+            className="shrink-0 text-[11px] font-medium text-zinc-400 hover:text-white transition-colors ml-3"
+          >
+            Open Raw Console ↗
+          </button>
+        </div>
+      )}
+
+      <SessionHistoryModal
+        open={showSessionModal}
+        onClose={() => setShowSessionModal(false)}
+        sessionSummaries={sessionSummaries}
+        catalogSessions={catalogSessions}
+        onSelectSession={(id) => setSelectedJobId(id)}
+        onRemoveSession={(id) => {
+          if (currentJobId === id) handleClear();
+          else onClear?.(id);
+        }}
+        onRestoreSession={onRestoreSession}
+        onNavigateToLibrary={onNavigateToLibrary}
+      />
+
+      <ItemContextMenu
+        contextMenu={contextMenu}
+        onClose={() => setContextMenu(null)}
+        fullPath={contextMenu ? getItemFullPath(contextMenu.item) : undefined}
+        elapsedMs={contextMenu ? getItemElapsedMs(contextMenu.item) : undefined}
+        openItemFile={openItemFile}
+        showItemInFolder={showItemInFolder}
+        onDeleteItem={deleteItemFile}
+        openOutputFolder={openOutputFolder}
+        onOpenRawConsole={onOpenRawConsole}
+        onStatus={onStatus}
+        hasOutputDir={hasOutputDir}
+        onRetryItem={onRetryItem}
+      />
+    </div>
+  );
+}

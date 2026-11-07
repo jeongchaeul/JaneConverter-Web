@@ -1,12 +1,13 @@
-import { Activity, BookOpen, FileAudio, FolderOpen, PanelLeftClose, PanelLeftOpen, Radio, Settings2, Sliders } from "lucide-react";
+import { Activity, BookOpen, FileAudio, FolderOpen, PanelLeftClose, PanelLeftOpen, Radio, Settings2, Sliders, TerminalSquare } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { hexToRgba } from "../utils/appearanceStorage";
 
-export type ViewKey = "converter" | "library" | "manual" | "settings";
+export type ViewKey = "converter" | "console" | "library" | "manual" | "settings";
 
 const workspaceItems: Array<{ key: ViewKey; label: string; icon: typeof FileAudio }> = [
   { key: "converter", label: "Converter", icon: FileAudio },
+  { key: "console", label: "Console", icon: TerminalSquare },
   { key: "library", label: "Library", icon: FolderOpen },
   { key: "manual", label: "User Manual", icon: BookOpen },
 ];
@@ -68,7 +69,9 @@ export function Sidebar({
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold tracking-tight text-white">JaneConverter</div>
-            <div className="mono-label mt-1">JANE&apos;S CREATOR TOOLBOX</div>
+            <div className="text-[10px] leading-tight text-zinc-400 mt-1">
+              JaneConverter&apos;s Web / Lite version of the Original JaneConverter Desktop Application, by project//aspyr
+            </div>
           </div>
         )}
       </div>
