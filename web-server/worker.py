@@ -235,9 +235,13 @@ class JobManager:
             # Scale conversion from 55% to 95%
             job.emit_progress(0.55 + (pct * 0.40), msg)
 
+        out_filename = f"{extracted_meta.get('title') or 'converted_media'}.{fmt}"
+        out_filename = "".join(c for c in out_filename if c.isalnum() or c in " ._-()").strip()
+
         converted_path = convert_media(
             input_path=source_input,
             output_dir=job_out_dir,
+            output_filename=out_filename,
             target_format=fmt,
             bitrate=req.audio_bitrate,
             normalize_audio=req.normalize_audio,
@@ -313,9 +317,13 @@ class JobManager:
                     target_format=fmt,
                 )
 
+                track_filename = f"{idx:02d}_{track_title}.{fmt}"
+                track_filename = "".join(c for c in track_filename if c.isalnum() or c in " ._-()").strip()
+
                 converted = convert_media(
                     input_path=extracted["media_path"],
                     output_dir=out_dir,
+                    output_filename=track_filename,
                     target_format=fmt,
                     bitrate=req.audio_bitrate,
                     normalize_audio=req.normalize_audio,
