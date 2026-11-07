@@ -1360,6 +1360,8 @@ def fetch_media_stream(
                     msg = f"Video is dead or unavailable on YouTube ({str(last_error).replace('ERROR: ', '').strip()})"
                 elif last_error and any(k in str(last_error).casefold() for k in ("403", "forbidden")):
                     msg = "YouTube CDN stream forbidden (HTTP 403 - token expired or throttled)"
+                elif gated_fallback_attempted and is_url(source):
+                    msg = "Stream extraction failed: YouTube requested bot verification or content is restricted, and no matching public alternative could be found."
                 else:
                     msg = f"No matching streams returned from search (tried {len(candidates)} query strategies)."
                     if last_error:

@@ -655,6 +655,7 @@ export function parseConversionEvents(
         detailMessage: singleDetail,
         coverPath: detectedCoverArt,
         thumbnail: singleThumbnail || extractYouTubeThumbnail(initialSource),
+        url: initialSource || extractYouTubeUrlFromThumbnail(detectedCoverArt) || extractYouTubeUrlFromThumbnail(singleThumbnail),
         errorMessage: singleError,
         outputPath: singleOutputPath,
       },

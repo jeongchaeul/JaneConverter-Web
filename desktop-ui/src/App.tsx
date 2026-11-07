@@ -174,6 +174,8 @@ export default function App() {
   const activeJobRef = useRef("");
   const activeJobSuggestLosslessRef = useRef(false);
   const activeJobContextRef = useRef<ActiveJobContext | null>(null);
+  const lastSourceRef = useRef<string>("");
+  const [lastSourceTitle, setLastSourceTitle] = useState<string>("");
   const [failure, setFailure] = useState<{ title: string; message: string; suggestLossless: boolean; elapsedMs?: number } | null>(null);
   const [success, setSuccess] = useState<SuccessPromptState | null>(null);
   const failureCloseRef = useRef<HTMLButtonElement>(null);
@@ -815,6 +817,10 @@ export default function App() {
   ): Promise<boolean> {
     try {
       const normalizedSource = source.trim();
+      if (normalizedSource) {
+        lastSourceRef.current = normalizedSource;
+        setLastSourceTitle(normalizedSource);
+      }
       let effectiveSettings = customSettings ?? settingsRef.current;
       if (customSettings) {
         settingsRef.current = customSettings;
@@ -994,7 +1000,7 @@ export default function App() {
       running={Boolean(jobId) || captureBusy}
       paused={paused}
       progress={progress}
-      sourceTitle={activeJobContextRef.current?.source || selectedCapture?.name || ""}
+      sourceTitle={activeJobContextRef.current?.source || selectedCapture?.name || lastSourceTitle || lastSourceRef.current || ""}
       outputDir={activeJobContextRef.current?.exportedPath || settings.outputDir}
       category={settings.category}
       format={settings.format}
@@ -1033,8 +1039,13 @@ export default function App() {
         setRawEvents((prev) => [...prev, ...syntheticEvents]);
       }}
       onRetryItem={async (item) => {
-        statusMessage(`Retrying: ${item.title}...`);
-        await start(item.url || activeJobContextRef.current?.source || "");
+        const targetUrl = item.url || extractYouTubeUrlFromThumbnail(item.thumbnail) || (item as any).source || activeJobContextRef.current?.source || lastSourceRef.current;
+        if (!targetUrl) {
+          statusMessage("No source URL available to retry.");
+          return;
+        }
+        statusMessage(`Retrying: ${item.title || targetUrl}...`);
+        await start(targetUrl);
       }}
     />
   ) : null;
