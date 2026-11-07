@@ -8,6 +8,8 @@ file upload, and multi-format conversion.
 import os
 import uuid
 import asyncio
+import shutil
+import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, status
@@ -39,10 +41,31 @@ from worker import manager, UPLOADS_DIR
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Start bgutil-pot POT daemon if available (YouTube Proof-of-Origin Token provider)
+    pot_proc = None
+    pot_bin = shutil.which("bgutil-pot") or ("/usr/local/bin/bgutil-pot" if os.path.exists("/usr/local/bin/bgutil-pot") else None)
+    if pot_bin:
+        try:
+            pot_proc = subprocess.Popen(
+                [pot_bin, "server", "--host", "127.0.0.1", "--port", "4416"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            print("[INFO] bgutil-pot POT provider server daemon started on 127.0.0.1:4416")
+        except Exception as e:
+            print(f"[WARN] Failed to start bgutil-pot daemon: {e}")
+
     # Start ephemeral file reaper task
     reaper = asyncio.create_task(manager.run_reaper_task())
-    yield
-    reaper.cancel()
+    try:
+        yield
+    finally:
+        reaper.cancel()
+        if pot_proc:
+            try:
+                pot_proc.terminate()
+            except Exception:
+                pass
 
 
 app = FastAPI(

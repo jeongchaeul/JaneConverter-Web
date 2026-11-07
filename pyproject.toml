@@ -36,7 +36,7 @@ dev = [
 path = "src/janeconverter/version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/janeconverter"]
+packages = ["src/janeconverter", "src/yt_dlp_plugins"]
 
 [tool.pytest.ini_options]
 addopts = '-m "not online"'

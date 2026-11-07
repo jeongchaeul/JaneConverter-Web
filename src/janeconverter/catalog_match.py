@@ -87,6 +87,21 @@ def match_score(requested, candidate, relaxed: bool = False):
     return 0.7 - extra_penalty + duration_score + artist_bonus + official_bonus + view_bonus + ver_bonus
 
 
+def rank_catalog_matches(requested, candidates, allow_relaxed: bool = True):
+    """Return all matching candidate recordings ranked by compatibility score."""
+    # Tier 1: Conservative strict matching
+    ranked = sorted(((match_score(requested, item, relaxed=False), item) for item in candidates if item),
+                    key=lambda pair: pair[0] if pair[0] is not None else -1, reverse=True)
+    items = [item for score, item in ranked if score is not None]
+
+    # Tier 2: Adaptive Catalog Matching (relaxed duration & permissible noise tokens)
+    if not items and allow_relaxed:
+        ranked_relaxed = sorted(((match_score(requested, item, relaxed=True), item) for item in candidates if item),
+                                key=lambda pair: pair[0] if pair[0] is not None else -1, reverse=True)
+        items = [item for score, item in ranked_relaxed if score is not None]
+    return items
+
+
 def choose_catalog_match(requested, candidates, allow_relaxed: bool = True):
     # Tier 1: Conservative strict matching
     ranked = sorted(((match_score(requested, item, relaxed=False), item) for item in candidates if item),

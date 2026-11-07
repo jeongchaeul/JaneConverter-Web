@@ -29,6 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Deno (yt-dlp official first-class challenge runtime)
 RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
+# Install bgutil-pot Rust binary (YouTube Proof-of-Origin Token provider for datacenter bot bypass)
+RUN curl -fsSL -o /usr/local/bin/bgutil-pot https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/download/v0.8.1/bgutil-pot-linux-x86_64     && chmod +x /usr/local/bin/bgutil-pot
+
 # Create standard non-root user for Hugging Face Spaces (UID 1000)
 RUN useradd -m -u 1000 appuser
 

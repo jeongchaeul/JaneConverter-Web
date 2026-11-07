@@ -19,7 +19,7 @@ import requests
 import yt_dlp
 from .paths import get_ytdlp_cache_dir
 from .session_pacer import pace_request
-from .catalog_match import choose_catalog_match, match_score
+from .catalog_match import choose_catalog_match, match_score, rank_catalog_matches
 from .extraction_recovery import classify_extraction, ExtractionCategory
 from .extraction_recovery import extract_with_recovery
 from .converter import get_js_runtimes_config
@@ -1248,14 +1248,24 @@ def fetch_media_stream(
                             if excluded_video_ids:
                                 matches = [m for m in matches if m and m.get("id") not in excluded_video_ids]
                             selected = choose_catalog_match(catalog_meta, matches)
-                            selected_url = selected.get("webpage_url") or selected.get("original_url") or selected.get("url")
-                            if (not selected_url or not is_url(selected_url)) and selected.get("id"):
-                                selected_url = f"https://www.youtube.com/watch?v={selected['id']}"
-                            if not selected_url or not is_url(selected_url):
-                                raise ValueError("Catalog candidate has no direct source link.")
-                            report(0.15, f"Catalog match selected from {identify_source_type(selected_url)}: {selected.get('title', '')}. This is an alternate public recording, not catalog audio.", force=True)
-                            cand_info = extract(selected_url, True)
-                            if not cand_info or match_score(catalog_meta, cand_info, relaxed=True) is None:
+                            cand_info = None
+                            try_candidates = [selected] + [m for m in rank_catalog_matches(catalog_meta, matches) if m.get("id") != selected.get("id")]
+                            for cand in try_candidates:
+                                selected_url = cand.get("webpage_url") or cand.get("original_url") or cand.get("url")
+                                if (not selected_url or not is_url(selected_url)) and cand.get("id"):
+                                    selected_url = f"https://www.youtube.com/watch?v={cand['id']}"
+                                if not selected_url or not is_url(selected_url):
+                                    continue
+                                try:
+                                    report(0.15, f"Catalog match candidate selected from {identify_source_type(selected_url)}: {cand.get('title', '')}...", force=True)
+                                    extracted = extract(selected_url, True)
+                                    if extracted and match_score(catalog_meta, extracted, relaxed=True) is not None:
+                                        cand_info = extracted
+                                        report(0.15, f"Catalog match confirmed and downloaded from {identify_source_type(selected_url)}: {cand.get('title', '')}.", force=True)
+                                        break
+                                except Exception:
+                                    continue
+                            if not cand_info:
                                 raise ValueError("The selected recording changed identity during download; it was not accepted.")
                         else:
                             cand_info = extract(query_item, True)
@@ -1288,6 +1298,19 @@ def fetch_media_stream(
                             oe = resolve_youtube_oembed_metadata(query_item) if is_url(str(query_item)) else {}
                             gated_title = fallback_title or oe.get("title")
                             gated_artist = fallback_artist or oe.get("artist") or "Unknown Artist"
+                            gated_duration = None
+                            if is_url(str(query_item)):
+                                try:
+                                    r_html = requests.get(str(query_item), headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=4)
+                                    m_dur = re.search(r'itemprop=["\']duration["\']\s+content=["\']PT(?:(\d+)M)?(?:(\d+)S)?["\']', r_html.text)
+                                    if m_dur:
+                                        gated_duration = float(int(m_dur.group(1) or 0) * 60 + int(m_dur.group(2) or 0))
+                                    elif "approxDurationMs" in r_html.text:
+                                        m_ms = re.search(r'["\']approxDurationMs["\']\s*:\s*["\'](\d+)["\']', r_html.text)
+                                        if m_ms:
+                                            gated_duration = float(m_ms.group(1)) / 1000.0
+                                except Exception:
+                                    pass
                             if gated_title:
                                 report(
                                     0.14,
@@ -1304,6 +1327,7 @@ def fetch_media_stream(
                                     "artist": gated_artist,
                                     "album": "",
                                     "year": "",
+                                    "duration": gated_duration,
                                     "thumbnail": oe.get("thumbnail"),
                                     "search_candidates": recovery_candidates,
                                 }
